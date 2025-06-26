@@ -1,0 +1,36 @@
+[build-system]
+requires = ["uv", "setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fluent-llm"
+version = "0.1.0"
+description = "A fluent interface for working with LLMs, providing a clean and intuitive API for AI-powered applications."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Henrik Heimbuerger", email = "henrik@heimbuerger.de" }
+]
+
+dependencies = [
+    "openai>=1.92",
+    "pydantic>=2.11",
+    "pillow>=11.2.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/hheimbuerger/fluent-llm"
+"Source" = "https://github.com/hheimbuerger/fluent-llm"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
