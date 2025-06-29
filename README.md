@@ -1,6 +1,16 @@
 # Fluent LLM
 
-A fluent, modern Python interface for working with LLMs. Clean, intuitive, and production-ready—distributed on PyPI.
+Expressive, opinionated, and fluent Python interface for working with LLMs. Clean, intuitive, and production-ready—distributed on PyPI.
+
+## Highlights
+
+- **Expressive:** Write natural, readable, and chainable LLM interactions.
+- **Opinionated:** Focuses on best practices and sensible defaults for LLM workflows.
+- **Fluent API:** Compose prompts, context, and expectations in a single chain.
+- **Supports multimodal (text, image, audio) inputs and outputs.**
+- **Modern Python:** Type hints, async/await, and dataclasses throughout.
+- **Easy testing:** Built-in support for both mocked and live API tests.
+- **Fast setup:** Uses [uv](https://github.com/astral-sh/uv) for blazing-fast dependency management.
 
 ## Installation
 

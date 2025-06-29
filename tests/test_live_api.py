@@ -18,24 +18,60 @@ async def test_text_generation_live():
 
 @pytest.mark.asyncio
 async def test_image_generation_live():
-    """Live test: image generation with the fluent interface (real API)."""
+    """
+    Live test: image generation with the fluent interface (real API).
+
+    This test verifies that:
+    1. The API returns a valid image generation response
+    2. The response contains the expected fields
+    3. The image data can be loaded as a PIL Image
+    4. Usage statistics are properly tracked
+    """
+    # Make the API call with specific image generation parameters
     response = await llm\
         .agent("You are a 17th century classic painter.")\
         .context("You were paid 10 francs for creating a portrait.")\
         .request('Create a portrait of Louis XIV.')\
         .expect(ResponseType.IMAGE)\
         .call()
-    assert isinstance(response, Image)
-    print("Image response is an Image instance.")
-    # Optionally display the image (uncomment if running interactively)
-    # response.show()
 
-    # Basic validation that stats were returned
+    # Verify the response is an image generation call object
+    assert hasattr(response, 'type'), "Response should have a 'type' attribute"
+    assert response.type == 'image_generation_call', f"Expected 'image_generation_call' type, got {response.type}"
+
+    # Verify required fields are present
+    required_attrs = ['image', 'prompt', 'size', 'quality', 'style']
+    for attr in required_attrs:
+        assert hasattr(response, attr), f"Response is missing required attribute: {attr}"
+
+    # Verify the image data is valid
+    assert isinstance(response.image, bytes), "Image data should be bytes"
+    assert len(response.image) > 0, "Image data should not be empty"
+
+    # Try to load the image with PIL to verify it's valid
+    try:
+        from io import BytesIO
+        from PIL import Image
+        img = Image.open(BytesIO(response.image))
+        assert img.format in ['PNG', 'JPEG', 'WEBP'], f"Unexpected image format: {img.format}"
+        print(f"Generated image: {img.size[0]}x{img.size[1]} {img.format}")
+    except Exception as e:
+        pytest.fail(f"Failed to load image data: {str(e)}")
+
+    # Verify usage statistics
     stats = llm.get_last_call_stats()
-    assert "No usage information" not in stats  # Should have usage info
+    assert "No usage information" not in stats, "Should have usage information"
 
-    print("\nUsage stats:", stats)
-    print("Response:", response)
+    # Print some debug info
+    print("\nImage generation successful!")
+    print(f"Prompt: {response.prompt}")
+    print(f"Size: {response.size}")
+    print(f"Quality: {response.quality}")
+    print(f"Style: {response.style}")
+    print(f"Usage stats: {stats}")
+
+    # Optionally display the image (uncomment if running interactively)
+    # img.show()
 
 
 @pytest.mark.asyncio

@@ -72,10 +72,39 @@ async def test_text_generation(patch_call_llm_api: AsyncMock) -> None:
 
 @pytest.mark.asyncio
 async def test_image_generation(patch_call_llm_api: AsyncMock) -> None:
-    """`ResponseType.IMAGE` returns bytes that start with a PNG header."""
-    img = await _builder().expect(ResponseType.IMAGE).call()
-    assert isinstance(img, bytes)
-    assert img.startswith(b"\x89PNG")
+    """`ResponseType.IMAGE` returns image generation call with correct parameters."""
+    # Setup the mock to return a sample image generation response
+    mock_response = type('MockResponse', (), {
+        'status': 'success',
+        'output': [
+            type('MockOutput', (), {
+                'type': 'image_generation_call',
+                'image': b'\x89PNG\r\n\x1a\n',
+                'prompt': 'A test image',
+                'size': '1024x1024',
+                'quality': 'standard',
+                'style': 'vivid',
+            })
+        ]
+    })
+    patch_call_llm_api.return_value = mock_response
+    
+    # Make the API call
+    builder = LLMPromptBuilder()
+    result = builder.image("A test image")
+    
+    # Verify the mock was called with the correct parameters
+    patch_call_llm_api.assert_called_once()
+    _, kwargs = patch_call_llm_api.call_args
+    assert kwargs['expect_type'] == ResponseType.IMAGE
+    assert 'tools' in kwargs
+    assert kwargs['tools'] == [{'type': 'image_generation'}]
+    
+    # Verify the response handling
+    assert hasattr(result, 'type')
+    assert result.type == 'image_generation_call'
+    assert hasattr(result, 'image')
+    assert result.image.startswith(b'\x89PNG')
 
 
 def test_usage_stats_reset_and_track() -> None:

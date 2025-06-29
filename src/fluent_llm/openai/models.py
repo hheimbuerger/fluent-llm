@@ -57,6 +57,23 @@ OPENAI_MODELS: Tuple[OpenAIModel, ...] = (
         additional_pricing={},
     ),
     OpenAIModel(
+        name="gpt-4.1-mini",
+        text_input=True,
+        image_input=True,
+        audio_input=False,
+        text_output=True,
+        image_output=True,
+        audio_output=False,
+        structured_output=True,
+        price_per_million_text_tokens_input=Decimal("0.15"),
+        price_per_million_text_tokens_output=Decimal("0.60"),
+        price_per_million_image_tokens_input=Decimal("1"),
+        price_per_million_image_tokens_output=None,  # Not available
+        price_per_million_audio_tokens_input=None,   # Not available
+        price_per_million_audio_tokens_output=None,  # Not available
+        additional_pricing={},
+    ),
+    OpenAIModel(
         name="gpt-4o-mini-audio",
         text_input=True,
         image_input=False,
@@ -125,7 +142,7 @@ def select_model(messages, expect_type):
         return False
     # Check for image output first (highest priority)
     if _has_image_output(expect_type):
-        return "gpt-image-1"
+        return "gpt-4.1-mini"
     # Check for audio input/output and no image input
     has_audio = _has_audio_output(expect_type) or _has_audio_input(messages)
     has_image = _has_image_input(messages)
