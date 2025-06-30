@@ -7,10 +7,9 @@ Expressive, opinionated, and fluent Python interface for working with LLMs. Clea
 - **Expressive:** Write natural, readable, and chainable LLM interactions.
 - **Opinionated:** Focuses on best practices and sensible defaults for LLM workflows.
 - **Fluent API:** Compose prompts, context, and expectations in a single chain.
-- **Supports multimodal (text, image, audio) inputs and outputs.**
+- **Supports multimodal (text, image, audio) inputs and outputs:** Automatically picks model based on modalities required.
+- **Automatic coroutines** Can be used both in async and sync contexts.
 - **Modern Python:** Type hints, async/await, and dataclasses throughout.
-- **Easy testing:** Built-in support for both mocked and live API tests.
-- **Fast setup:** Uses [uv](https://github.com/astral-sh/uv) for blazing-fast dependency management.
 
 ## Installation
 
@@ -37,7 +36,27 @@ $env:OPENAI_API_KEY="sk-..."
 
 The `OPENAI_API_KEY` environment variable is required for all live API calls.
 
-## Usage Examples
+## Usage
+
+### Basics
+
+```python
+from fluent_llm import llm, ResponseType
+
+response = llm
+    .agent("You are an art evaluator.")
+    .context("You received this painting and were tasked to evaluate whether it's museum-worthy.")
+    .image("painting.png")
+    .expect(ResponseType.TEXT)
+    .call()
+
+assert isinstance(response, str)
+print(response)
+```
+
+### Async/await
+
+Just works. See if you can spot the difference to the example above.
 
 ```python
 from fluent_llm import llm, ResponseType
@@ -49,15 +68,22 @@ response = await llm
     .expect(ResponseType.TEXT)
     .call()
 
-assert isinstance(response, str)
 print(response)
 ```
+
+### CLI usage
+
+```bash
+uvx fluent-llm llm.agent('foo').request('bar')
+```
+
+### Multimodality
 
 ```python
 from fluent_llm import llm, ResponseType
 import PIL
 
-response = await llm
+response = llm
     .agent("You are a 17th century classic painter.")
     .context("You were paid 10 francs for creating a portrait.")
     .request('Create a portrait of Louis XIV.')
@@ -67,6 +93,8 @@ response = await llm
 assert isinstance(response, PIL.Image)
 response.show()
 ```
+
+
 
 ## Running Tests
 

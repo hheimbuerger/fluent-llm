@@ -30,7 +30,8 @@ from decimal import Decimal
 from .usage_tracker import tracker
 from .openai.models import OPENAI_MODELS, get_model_by_name
 from .openai.invoker import call_llm_api
-from .messages import Message, TextMessage, AudioMessage, ImageMessage, AgentMessage, ResponseType
+from .messages import Message, TextMessage, AudioMessage, ImageMessage, AgentMessage, ResponseType, MessageList
+from .model_selector import ModelSelectionStrategy, DefaultModelSelectionStrategy
 
 __all__: Sequence[str] = [
     "llm",
@@ -40,17 +41,26 @@ __all__: Sequence[str] = [
 class LLMPromptBuilder:
     """Fluent, async builder for LLM requests."""
 
-    def __init__(self, *, client: Any | None = None, messages: List[Message] | None = None, expect: ResponseType | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        client: Any | None = None,
+        messages: MessageList | None = None,
+        expect: ResponseType | None = None,
+        model_selector: ModelSelectionStrategy | None = None
+    ) -> None:
         self._client: Any = client
-        self._messages: List[Message] = messages or []
+        self._messages: MessageList = messages or MessageList()
         self._expect: ResponseType = expect or ResponseType.TEXT
+        self._model_selector: ModelSelectionStrategy = model_selector or DefaultModelSelectionStrategy()
 
     def _copy(self) -> "LLMPromptBuilder":
         """Create a copy of this builder with the same state."""
         return self.__class__(
             client=self._client,
             messages=self._messages.copy(),
-            expect=self._expect
+            expect=self._expect,
+            model_selector=self._model_selector,
         )
 
     # ------------------------------------------------------------------
@@ -117,22 +127,22 @@ class LLMPromptBuilder:
     # ------------------------------------------------------------------
     def _gather_token_counts(self, data: Any, path: str = '') -> list[tuple[str, int]]:
         """Recursively gather all token counts from a nested dictionary.
-        
+
         Args:
             data: The dictionary or value to search for token counts
             path: Dot-separated path to the current location in the dictionary
-            
+
         Returns:
             List of (token_key, count) tuples where token_key is the full path to the count
         """
         counts = []
-        
+
         if isinstance(data, dict):
             for key, value in data.items():
                 # Skip 'total_tokens' as it's not a billable token type
                 if key == 'total_tokens':
                     continue
-                    
+
                 current_path = f"{path}.{key}" if path else key
                 if key.endswith(('_tokens', '_tokens_details')) or 'token' in key.lower():
                     if isinstance(value, int) and value > 0:
@@ -144,7 +154,7 @@ class LLMPromptBuilder:
         elif isinstance(data, list):
             for i, item in enumerate(data):
                 counts.extend(self._gather_token_counts(item, f"{path}[{i}]"))
-                
+
         return counts
 
     def get_last_call_stats(self) -> str:
@@ -154,7 +164,7 @@ class LLMPromptBuilder:
         by ``call_llm_api`` and looks up pricing in :data:`fluent_llm.openai.models.OPENAI_MODELS`.
 
         All non-zero token categories in the usage dictionary are included, including
-        nested fields. If any token category present in the usage stats cannot be 
+        nested fields. If any token category present in the usage stats cannot be
         priced, a ``RuntimeError`` is raised to surface the missing information.
 
         Returns:
@@ -188,7 +198,7 @@ class LLMPromptBuilder:
 
         # Gather all token counts from the usage dictionary, including nested ones
         token_counts = self._gather_token_counts(usage)
-        
+
         # Check that all token types have pricing
         missing_pricing = []
         for token_key, count in token_counts:
@@ -199,7 +209,7 @@ class LLMPromptBuilder:
                 last_part = token_key.split('.')[-1]
                 if last_part in price_map:
                     price_key = last_part
-            
+
             if price_key not in price_map or (isinstance(price_map[price_key], Decimal) and price_map[price_key].is_nan()):
                 missing_pricing.append((token_key, count))
 
@@ -219,7 +229,7 @@ class LLMPromptBuilder:
                 last_part = token_key.split('.')[-1]
                 if last_part in price_map:
                     price_key = last_part
-            
+
             price_per_million = price_map[price_key]
             cost = (Decimal(count) * price_per_million) / Decimal(1_000_000)
             output.append(f"{token_key}: {count} tokens → ${cost:.6f}")
@@ -234,29 +244,32 @@ class LLMPromptBuilder:
         Convert abstract prompt to OpenAI format and execute asynchronously.
 
         Args:
-            model: The model to use for the completion
+            model: The model to use for the completion. If None, the model selector will be used.
             **kwargs: Additional arguments to pass to the OpenAI API
 
         Returns:
             The response from the OpenAI API, with the format depending on expect_type
+
+        Raises:
+            ValueError: If the selected model is not valid for the given input/output
+            RuntimeError: If there is an error calling the LLM API
         """
+        # Select the model
+        invoker, model = self._model_selector.select_model(self._messages, self._expect)
+
         # Call the API
-        try:
-            # If _expect is a BaseModel subclass, pass as structured_output_model
-            return await call_llm_api(
-                client=self._client,
-                messages=self._messages,
-                expect_type=ResponseType.JSON if issubclass(self._expect, BaseModel) else self._expect,
-                text={
-                    "type": "json_schema",
-                    "name": self._expect.__name__,
-                    "schema": self._expect.model_json_schema(),
-                } if issubclass(self._expect, BaseModel) else None,
-                **kwargs,
-            )
-        except () as e:
-            # Handle any API errors here
-            raise RuntimeError(f"Error calling LLM API: {str(e)}") from e
+        return await invoker(
+            client=self._client,
+            messages=self._messages,
+            model=model,
+            expect_type=ResponseType.JSON if isinstance(self._expect, type) and issubclass(self._expect, BaseModel) else self._expect,
+            text={
+                "type": "json_schema",
+                "name": self._expect.__name__,
+                "schema": self._expect.model_json_schema(),
+            } if isinstance(self._expect, type) and issubclass(self._expect, BaseModel) else None,
+            **kwargs,
+        )
 
 
 # ---------------------------------------------------------------------------

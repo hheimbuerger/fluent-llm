@@ -1,8 +1,6 @@
-from typing import Any, List, Union, get_origin, get_args
+from typing import Any, get_origin, get_args
 from ..usage_tracker import tracker
-from ..messages import Message, AudioMessage, ImageMessage, ResponseType, TextMessage, AgentMessage
-from .models import select_and_validate_model
-import inspect
+from ..messages import Message, AudioMessage, ImageMessage, ResponseType, TextMessage, AgentMessage, MessageList
 import openai
 import base64
 
@@ -32,9 +30,11 @@ def _convert_to_openai_format(message: Message) -> dict:
 
     raise ValueError(f"Unsupported message type: {type(message).__name__}")
 
+
 async def call_llm_api(
     client: Any | None,
-    messages: List[Message],
+    model: str,
+    messages: MessageList,
     expect_type: ResponseType,
     **kwargs: Any
 ) -> Any:
@@ -43,9 +43,6 @@ async def call_llm_api(
     The model is always inferred from the input and expected output.
     Uses the new OpenAI Responses interface.
     """
-    # select model
-    selected_model = select_and_validate_model(messages, expect_type)
-
     # create client if not specified
     client = client or openai.AsyncOpenAI()
 
@@ -54,7 +51,7 @@ async def call_llm_api(
 
     # Prepare API parameters
     api_params = {
-        "model": selected_model,
+        "model": model,
         "input": openai_messages,
         **kwargs,
     }
@@ -63,11 +60,11 @@ async def call_llm_api(
     if expect_type == ResponseType.IMAGE:
         api_params["tools"] = [{"type": "image_generation"}]
 
-    # Call the OpenAI responses API (not chat completions)
+    # Call the OpenAI responses API
     response = await client.responses.create(**api_params)
 
     # Check response status
-    if hasattr(response, 'status') and response.status != 'success':
+    if response.status != 'completed':
         error_msg = f"API call failed with status: {response.status}"
         if hasattr(response, 'error'):
             error_msg += f" - {response.error}"
