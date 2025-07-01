@@ -80,7 +80,7 @@ class DefaultModelSelectionStrategy(ModelSelectionStrategy):
         """
         # Check for image output first (highest priority)
         if expect_type == ResponseType.IMAGE:
-            model = "gpt-4.1-mini"
+            model = "gpt-image-1"
 
         else:
             # Check for audio input/output and no image input

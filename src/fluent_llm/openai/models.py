@@ -66,9 +66,9 @@ OPENAI_MODELS: Tuple[OpenAIModel, ...] = (
         price_per_million_text_tokens_input=Decimal("0.15"),
         price_per_million_text_tokens_output=Decimal("0.60"),
         price_per_million_image_tokens_input=Decimal("1"),
-        price_per_million_image_tokens_output=None,  # Not available
-        price_per_million_audio_tokens_input=None,   # Not available
-        price_per_million_audio_tokens_output=None,  # Not available
+        price_per_million_image_tokens_output=Decimal('NaN'),  # Not available
+        price_per_million_audio_tokens_input=Decimal('NaN'),   # Not available
+        price_per_million_audio_tokens_output=Decimal('NaN'),  # Not available
         additional_pricing={},
     ),
     OpenAIModel(
@@ -98,11 +98,11 @@ OPENAI_MODELS: Tuple[OpenAIModel, ...] = (
         audio_output=False,
         structured_output=False,
         price_per_million_text_tokens_input=Decimal("5.00"),  # FILL ME
-        price_per_million_text_tokens_output=None, # Not available
+        price_per_million_text_tokens_output=Decimal('10.00'), # FIXME: actually unknown, not mentioned on https://platform.openai.com/docs/pricing#latest-models
         price_per_million_image_tokens_input=Decimal('10.00'),    # Not available
         price_per_million_image_tokens_output=Decimal('40.00'),   # Not available
-        price_per_million_audio_tokens_input=None, # Not available
-        price_per_million_audio_tokens_output=None,# Not available
+        price_per_million_audio_tokens_input=Decimal('NaN'), # Not available
+        price_per_million_audio_tokens_output=Decimal('NaN'),# Not available
         additional_pricing={},
     ),
     # Add more models as needed...

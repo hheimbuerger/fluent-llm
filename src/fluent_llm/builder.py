@@ -22,16 +22,15 @@ print(response)
 from __future__ import annotations
 
 import pathlib
-from typing import Any, List, Sequence, Type
+from typing import Any, Sequence, Type
 import inspect
 from .utils import asyncify
 
 from pydantic import BaseModel
 from decimal import Decimal
 from .usage_tracker import tracker
-from .openai.models import OPENAI_MODELS, get_model_by_name
-from .openai.invoker import call_llm_api
-from .messages import Message, TextMessage, AudioMessage, ImageMessage, AgentMessage, ResponseType, MessageList
+from .openai.models import get_model_by_name
+from .messages import TextMessage, AudioMessage, ImageMessage, AgentMessage, ResponseType, MessageList
 from .model_selector import ModelSelectionStrategy, DefaultModelSelectionStrategy
 
 __all__: Sequence[str] = [

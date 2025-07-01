@@ -32,19 +32,13 @@ class UsageTracker:
         self._usage_stats: Dict[str, UsageStats] = {}
         self.last_call_usage: Optional[dict] = None
 
-    def track_usage(self, response: Any) -> None:
+    def track_usage(self, model: str, usage: UsageStats) -> None:
         """Track usage from an API response object.
 
         Args:
-            response: The API response object containing usage information.
-                     Expected to have 'model' and 'usage' attributes with token counts.
+            model: The model name.
+            usage: The usage statistics.
         """
-        if not response or not hasattr(response, 'model') or not hasattr(response, 'usage'):
-            return
-
-        model = response.model
-        usage = response.usage
-
         # Convert usage to dictionary, handling both object and dict
         usage_dict = {}
         usage_attrs = [
@@ -106,8 +100,8 @@ class UsageTracker:
         # Combine stats for all models
         combined = UsageStats()
         for stats in self._usage_stats.values():
-            combined.prompt_tokens += stats.prompt_tokens
-            combined.completion_tokens += stats.completion_tokens
+            combined.input_tokens += stats.input_tokens
+            combined.output_tokens += stats.output_tokens
             combined.total_tokens += stats.total_tokens
             combined.call_count += stats.call_count
 
@@ -153,13 +147,9 @@ def get_last_call_usage() -> Optional[dict]:
     """Get the usage statistics for the last API call."""
     return tracker.last_call_usage
 
-def track_usage(response: Dict[str, Any]) -> None:
-    """Convenience function to track usage from a response using the global tracker.
-
-    Args:
-        response: The API response dictionary containing usage information.
-    """
-    tracker.track_usage(response)
+def track_usage(model: str, usage: UsageStats) -> None:
+    """Convenience function to track usage from a response using the global tracker."""
+    tracker.track_usage(model, usage)
 
 def get_usage(model: Optional[str] = None) -> Dict[str, Any]:
     """Convenience function to get usage statistics from the global tracker.

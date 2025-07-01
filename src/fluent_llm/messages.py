@@ -177,10 +177,14 @@ class MessageList(list[Message]):
     def to_dict_list(self) -> list[dict]:
         """Convert all messages in the list to their dictionary representation."""
         return [msg.to_dict() for msg in self]
-        
+
+    def merge_all_text(self) -> str:
+        """Merge all text messages into a single string."""
+        return "\n".join(msg.text for msg in self if isinstance(msg, (AgentMessage, TextMessage)))
+
     def copy(self) -> 'MessageList':
         """Return a shallow copy of the MessageList.
-        
+
         Returns:
             A new MessageList instance containing the same Message objects.
         """

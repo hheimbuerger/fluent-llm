@@ -82,46 +82,21 @@ async def test_image_generation_live():
     4. Usage statistics are properly tracked
     """
     # Make the API call with specific image generation parameters
-    response = await llm\
+    image = await llm\
         .agent("You are a 17th century classic painter.")\
         .context("You were paid 10 francs for creating a portrait.")\
         .request('Create a portrait of Louis XIV.')\
         .prompt_for_image()
 
     # Verify the response is an image generation call object
-    assert hasattr(response, 'type'), "Response should have a 'type' attribute"
-    assert response.type == 'image_generation_call', f"Expected 'image_generation_call' type, got {response.type}"
-
-    # Verify required fields are present
-    required_attrs = ['image', 'prompt', 'size', 'quality', 'style']
-    for attr in required_attrs:
-        assert hasattr(response, attr), f"Response is missing required attribute: {attr}"
-
-    # Verify the image data is valid
-    assert isinstance(response.image, bytes), "Image data should be bytes"
-    assert len(response.image) > 0, "Image data should not be empty"
-
-    # Try to load the image with PIL to verify it's valid
-    try:
-        from io import BytesIO
-        from PIL import Image
-        img = Image.open(BytesIO(response.image))
-        assert img.format in ['PNG', 'JPEG', 'WEBP'], f"Unexpected image format: {img.format}"
-        print(f"Generated image: {img.size[0]}x{img.size[1]} {img.format}")
-    except Exception as e:
-        pytest.fail(f"Failed to load image data: {str(e)}")
+    assert isinstance(image, Image)
+    assert image.format in ['PNG', 'JPEG', 'WEBP'], f"Unexpected image format: {image.format}"
+    print(f"Generated image: {image.size[0]}x{image.size[1]} {image.format}")
 
     # Verify usage statistics
     stats = llm.get_last_call_stats()
+    # TODO: ensure there are image generation and image output tokens in the last usage stats
     assert "No usage information" not in stats, "Should have usage information"
-
-    # Print some debug info
-    print("\nImage generation successful!")
-    print(f"Prompt: {response.prompt}")
-    print(f"Size: {response.size}")
-    print(f"Quality: {response.quality}")
-    print(f"Style: {response.style}")
-    print(f"Usage stats: {stats}")
 
     # Optionally display the image (uncomment if running interactively)
     # img.show()
