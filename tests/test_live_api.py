@@ -1,20 +1,45 @@
 import pytest
 from PIL import Image
 
-from fluent_llm import llm, ResponseType
+from fluent_llm import llm
 
 @pytest.mark.asyncio
-async def test_text_generation_live():
+async def test_text_generation_live_async():
     """Live test: text generation with the fluent interface (real API)."""
     response = await llm\
         .agent("You are an art evaluator.")\
         .context("You received this painting from your client.")\
         .image("tests/painting.png")\
         .request("Please evaluate this painting and state your opinion whether it's museum-worthy.")\
-        .expect(ResponseType.TEXT)\
-        .call()
+        .prompt()
     assert isinstance(response, str)
     print("Text response:", response)
+
+
+def test_text_generation_live_sync():
+    """Live test: synchronous text generation with the fluent interface (real API)."""
+    response = llm\
+        .agent("You are an art evaluator.")\
+        .context("You received this painting from your client.")\
+        .image("tests/painting.png")\
+        .request("Please evaluate this painting and state your opinion whether it's museum-worthy.")\
+        .prompt()
+    assert isinstance(response, str)
+    print("Text response:", response)
+
+
+@pytest.mark.asyncio
+async def test_audio_in():
+    """Live test: text generation with the fluent interface (real API)."""
+    response = await llm\
+        .agent("You are a biologist.")\
+        .audio("tests/maybe_cat.ogg")\
+        .request("What animal is this?")\
+        .prompt()
+    assert isinstance(response, str)
+    assert 'cat' in response
+    print("Text response:", response)
+
 
 @pytest.mark.asyncio
 async def test_image_generation_live():
@@ -32,8 +57,7 @@ async def test_image_generation_live():
         .agent("You are a 17th century classic painter.")\
         .context("You were paid 10 francs for creating a portrait.")\
         .request('Create a portrait of Louis XIV.')\
-        .expect(ResponseType.IMAGE)\
-        .call()
+        .prompt_for_image()
 
     # Verify the response is an image generation call object
     assert hasattr(response, 'type'), "Response should have a 'type' attribute"
@@ -80,8 +104,7 @@ async def test_usage_stats_live():
     # Make a simple API call
     response = await llm\
         .request("How tall is the Fernsehturm in Berlin?")\
-        .expect(ResponseType.TEXT)\
-        .call()
+        .prompt()
     assert 'Berlin' in response
 
     # Get the usage stats

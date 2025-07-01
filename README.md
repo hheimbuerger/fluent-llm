@@ -41,14 +41,13 @@ The `OPENAI_API_KEY` environment variable is required for all live API calls.
 ### Basics
 
 ```python
-from fluent_llm import llm, ResponseType
+from fluent_llm import llm
 
-response = llm
-    .agent("You are an art evaluator.")
-    .context("You received this painting and were tasked to evaluate whether it's museum-worthy.")
-    .image("painting.png")
-    .expect(ResponseType.TEXT)
-    .call()
+response = await llm \
+    .agent("You are an art evaluator.") \
+    .context("You received this painting and were tasked to evaluate whether it's museum-worthy.") \
+    .image("painting.png") \
+    .prompt()
 
 assert isinstance(response, str)
 print(response)
@@ -59,15 +58,15 @@ print(response)
 Just works. See if you can spot the difference to the example above.
 
 ```python
-from fluent_llm import llm, ResponseType
+from fluent_llm import llm
 
-response = await llm
-    .agent("You are an art evaluator.")
-    .context("You received this painting and were tasked to evaluate whether it's museum-worthy.")
-    .image("painting.png")
-    .expect(ResponseType.TEXT)
-    .call()
+response = await llm \
+    .agent("You are an art evaluator.") \
+    .context("You received this painting and were tasked to evaluate whether it's museum-worthy.") \
+    .image("painting.png") \
+    .prompt()
 
+assert isinstance(response, str)
 print(response)
 ```
 
@@ -87,14 +86,29 @@ response = llm
     .agent("You are a 17th century classic painter.")
     .context("You were paid 10 francs for creating a portrait.")
     .request('Create a portrait of Louis XIV.')
-    .expect(ResponseType.IMAGE)
-    .call()
+    .prompt_for_image()
 
 assert isinstance(response, PIL.Image)
 response.show()
 ```
 
+## Customization
 
+If the defaults are not sufficient, you can customize the behavior of the builder by creating your own `LLMPromptBuilder`, instead of using the `llm` global instance provided for convenience.
+
+However, note that you're probably quickly reaching the point at which you should ask yourself if you're not better off using the official OpenAI Python client library directly. This library is designed to be a simple and opinionated wrapper around the OpenAI API, and it's not intended to be a full-featured LLM client.
+
+### Model Selection
+
+Pass in a custom `ModelSelectionStrategy` to the `LLMPromptBuilder` constructor, to select provider and model based on your own criteria.
+
+### Invocation
+
+Instead of using the convenience methods `.prompt_*()`, you can use the `.call()` method to execute the prompt and return a response.
+
+### Client
+
+Pass in a custom `client` to the `.call()` method, to use a custom client for the API call.
 
 ## Running Tests
 

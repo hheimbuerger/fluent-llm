@@ -24,6 +24,7 @@ from __future__ import annotations
 import pathlib
 from typing import Any, List, Sequence, Type
 import inspect
+from .utils import asyncify
 
 from pydantic import BaseModel
 from decimal import Decimal
@@ -44,12 +45,10 @@ class LLMPromptBuilder:
     def __init__(
         self,
         *,
-        client: Any | None = None,
         messages: MessageList | None = None,
         expect: ResponseType | None = None,
         model_selector: ModelSelectionStrategy | None = None
     ) -> None:
-        self._client: Any = client
         self._messages: MessageList = messages or MessageList()
         self._expect: ResponseType = expect or ResponseType.TEXT
         self._model_selector: ModelSelectionStrategy = model_selector or DefaultModelSelectionStrategy()
@@ -57,7 +56,6 @@ class LLMPromptBuilder:
     def _copy(self) -> "LLMPromptBuilder":
         """Create a copy of this builder with the same state."""
         return self.__class__(
-            client=self._client,
             messages=self._messages.copy(),
             expect=self._expect,
             model_selector=self._model_selector,
@@ -237,29 +235,62 @@ class LLMPromptBuilder:
         return "\n".join(output)
 
     # ------------------------------------------------------------------
+    # Prompt-for-* convenience methods (public API)
+    # ------------------------------------------------------------------
+    @asyncify
+    async def prompt_for_text(self, **kwargs: Any) -> Any:
+        """Execute the prompt and return a text response."""
+        new_instance = self._copy()
+        new_instance._expect = ResponseType.TEXT
+        return await new_instance.call(**kwargs)
+
+    @asyncify
+    async def prompt_for_image(self, **kwargs: Any) -> Any:
+        """Execute the prompt and return an image response."""
+        new_instance = self._copy()
+        new_instance._expect = ResponseType.IMAGE
+        return await new_instance.call(**kwargs)
+
+    @asyncify
+    async def prompt_for_audio(self, **kwargs: Any) -> Any:
+        """Execute the prompt and return an audio response."""
+        new_instance = self._copy()
+        new_instance._expect = ResponseType.AUDIO
+        return await new_instance.call(**kwargs)
+
+    @asyncify
+    async def prompt(self, **kwargs: Any) -> Any:
+        """Alias for prompt_for_text: execute the prompt and return a text response."""
+        return await self.prompt_for_text(**kwargs)
+
+    # ------------------------------------------------------------------
     # Execution
     # ------------------------------------------------------------------
-    async def call(self, **kwargs: Any) -> Any:
+    async def call(self, client: Any = None, **kwargs: Any) -> Any:
         """
         Convert abstract prompt to OpenAI format and execute asynchronously.
 
         Args:
+            client: The OpenAI client to use for the API call. If None, a default client will be used.
             model: The model to use for the completion. If None, the model selector will be used.
             **kwargs: Additional arguments to pass to the OpenAI API
 
         Returns:
-            The response from the OpenAI API, with the format depending on expect_type
+            The response from the OpenAI API. The format depends on the expected type:
+            - For text: str
+            - For JSON: dict or Pydantic model instance if a model class was specified
+            - For images: Image object or URL depending on the model
 
         Raises:
             ValueError: If the selected model is not valid for the given input/output
-            RuntimeError: If there is an error calling the LLM API
+            RuntimeError: If there is an error calling the LLM API or processing the response
         """
         # Select the model
         invoker, model = self._model_selector.select_model(self._messages, self._expect)
 
         # Call the API
         return await invoker(
-            client=self._client,
+            client=client,
             messages=self._messages,
             model=model,
             expect_type=ResponseType.JSON if isinstance(self._expect, type) and issubclass(self._expect, BaseModel) else self._expect,
