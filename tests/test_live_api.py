@@ -1,16 +1,15 @@
 import pytest
-from PIL import Image
-
+from PIL.Image import Image
+from pydantic import BaseModel
 from fluent_llm import llm
+
 
 @pytest.mark.asyncio
 async def test_text_generation_live_async():
-    """Live test: text generation with the fluent interface (real API)."""
+    """Live test: asynchronous text generation with the fluent interface (real API)."""
     response = await llm\
-        .agent("You are an art evaluator.")\
-        .context("You received this painting from your client.")\
-        .image("tests/painting.png")\
-        .request("Please evaluate this painting and state your opinion whether it's museum-worthy.")\
+        .agent("You are terse.")\
+        .request("Say hi in one word.")\
         .prompt()
     assert isinstance(response, str)
     print("Text response:", response)
@@ -19,6 +18,36 @@ async def test_text_generation_live_async():
 def test_text_generation_live_sync():
     """Live test: synchronous text generation with the fluent interface (real API)."""
     response = llm\
+        .agent("You are terse.")\
+        .request("Say hi in one word.")\
+        .prompt()
+    assert isinstance(response, str)
+    print("Text response:", response)
+
+
+@pytest.mark.asyncio
+async def test_structured_output_live():
+    """Live test: async text generation with structured output (real API)."""
+    class EvaluationResult(BaseModel):
+        """Example type for structured output."""
+        score: int
+        reason: str
+
+    response = await llm\
+        .agent("You are an art evaluator.")\
+        .request("Rate the Mona Lisa on a scale of 1-10 and explain your rating.")\
+        .prompt_for_type(EvaluationResult)
+
+    assert isinstance(response, EvaluationResult)
+    assert 1 <= response.score <= 10
+    assert isinstance(response.reason, str) and len(response.reason) > 0
+    print(f"Structured response - Score: {response.score}, Reason: {response.reason}")
+
+
+@pytest.mark.asyncio
+async def test_image_in():
+    """Live test: text generation with image in."""
+    response = await llm\
         .agent("You are an art evaluator.")\
         .context("You received this painting from your client.")\
         .image("tests/painting.png")\

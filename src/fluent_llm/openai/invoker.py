@@ -1,8 +1,13 @@
-from typing import Any, get_origin, get_args
+from typing import Any, Type
 from ..usage_tracker import tracker
 from ..messages import Message, AudioMessage, ImageMessage, ResponseType, TextMessage, AgentMessage, MessageList
 import openai
 import base64
+from io import BytesIO
+import PIL.Image
+from pydantic import BaseModel
+
+from ..exceptions import LLMRefusalError
 
 
 def _convert_to_openai_format(message: Message) -> dict:
@@ -35,7 +40,7 @@ async def call_llm_api(
     client: Any | None,
     model: str,
     messages: MessageList,
-    expect_type: ResponseType,
+    expect_type: ResponseType | Type[BaseModel],
     **kwargs: Any
 ) -> Any:
     """
@@ -56,12 +61,23 @@ async def call_llm_api(
         **kwargs,
     }
 
-    # Add tools parameter if we're expecting an image
+    # Determine if this is a structured output request
+    is_structured_output = isinstance(expect_type, type) and issubclass(expect_type, BaseModel)
+
+    # Configure API parameters based on expected output type
     if expect_type == ResponseType.IMAGE:
         api_params["tools"] = [{"type": "image_generation"}]
+    elif is_structured_output:
+        # For structured output, ensure we get JSON
+        api_params["text_format"] = expect_type
 
-    # Call the OpenAI responses API
-    response = await client.responses.create(**api_params)
+    # Call the appropriate OpenAI API method based on the expected output type
+    if is_structured_output:
+        # For structured output, use parse()
+        response = await client.responses.parse(**api_params)
+    else:
+        # For other types, use create()
+        response = await client.responses.create(**api_params)
 
     # Check response status
     if response.status != 'completed':
@@ -95,5 +111,16 @@ async def call_llm_api(
     if expect_type == ResponseType.TEXT:
         # The responses API returns a list of choices, each with a message
         return response.output_text
+
+    # Handle JSON/structured output
+    if is_structured_output:
+        # Check for refusal in the response
+        if hasattr(response, 'refusal') and response.refusal is not None:
+            raise LLMRefusalError(str(response.refusal))
+
+        if not hasattr(response, 'output_parsed') or response.output_parsed is None:
+            raise ValueError("No structured output found in the response")
+
+        return response.output_parsed
 
     raise NotImplementedError(f"ResponseType {expect_type} not supported yet in call_llm_api.")

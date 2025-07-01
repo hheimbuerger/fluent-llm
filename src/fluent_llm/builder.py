@@ -259,6 +259,33 @@ class LLMPromptBuilder:
         return await new_instance.call(**kwargs)
 
     @asyncify
+    async def prompt_for_type(self, response_type: Type[BaseModel], **kwargs: Any) -> Any:
+        """Execute the prompt and return a response parsed into the specified Pydantic model.
+
+        Args:
+            response_type: A Pydantic model class to parse the response into.
+            **kwargs: Additional arguments to pass to the OpenAI API.
+
+        Returns:
+            An instance of the specified Pydantic model with the parsed response.
+
+        Example:
+            ```python
+            class EvaluationResult(BaseModel):
+                score: int
+                reason: str
+
+            result = await llm\
+                .agent("You are an art evaluator.")\
+                .request("Rate this painting on a scale of 1-10 and explain your rating.")\
+                .prompt_for_type(EvaluationResult)
+            ```
+        """
+        new_instance = self._copy()
+        new_instance._expect = response_type
+        return await new_instance.call(**kwargs)
+
+    @asyncify
     async def prompt(self, **kwargs: Any) -> Any:
         """Alias for prompt_for_text: execute the prompt and return a text response."""
         return await self.prompt_for_text(**kwargs)
@@ -293,12 +320,7 @@ class LLMPromptBuilder:
             client=client,
             messages=self._messages,
             model=model,
-            expect_type=ResponseType.JSON if isinstance(self._expect, type) and issubclass(self._expect, BaseModel) else self._expect,
-            text={
-                "type": "json_schema",
-                "name": self._expect.__name__,
-                "schema": self._expect.model_json_schema(),
-            } if isinstance(self._expect, type) and issubclass(self._expect, BaseModel) else None,
+            expect_type=self._expect,
             **kwargs,
         )
 
