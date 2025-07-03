@@ -15,6 +15,7 @@ authors = [
 
 dependencies = [
     "openai>=1.92",
+    "anthropic>=0.56",
     "pydantic>=2.11",
     "pillow>=11.2.1",
 ]

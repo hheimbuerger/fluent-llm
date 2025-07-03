@@ -29,13 +29,15 @@ from .utils import asyncify
 from pydantic import BaseModel
 from decimal import Decimal
 from .usage_tracker import tracker
-from .openai.models import get_model_by_name
 from .messages import TextMessage, AudioMessage, ImageMessage, AgentMessage, ResponseType, MessageList
 from .model_selector import ModelSelectionStrategy, DefaultModelSelectionStrategy
 
 __all__: Sequence[str] = [
     "llm",
 ]
+
+
+_TEMP_last_provider = None
 
 
 class LLMPromptBuilder:
@@ -54,11 +56,12 @@ class LLMPromptBuilder:
 
     def _copy(self) -> "LLMPromptBuilder":
         """Create a copy of this builder with the same state."""
-        return self.__class__(
+        new_instance = self.__class__(
             messages=self._messages.copy(),
             expect=self._expect,
             model_selector=self._model_selector,
         )
+        return new_instance
 
     # ------------------------------------------------------------------
     # Chainable mutators
@@ -172,7 +175,8 @@ class LLMPromptBuilder:
             return "[fluent-llm] No usage information available for last call."
 
         model_name: str = usage.get("model")  # type: ignore[arg-type]
-        model = get_model_by_name(model_name)
+        global _TEMP_last_provider
+        model = _TEMP_last_provider.get_model_by_name(model_name)
         if model is None:
             raise RuntimeError(f"Pricing data for model '{model_name}' not found.")
 
@@ -292,33 +296,35 @@ class LLMPromptBuilder:
     # ------------------------------------------------------------------
     # Execution
     # ------------------------------------------------------------------
-    async def call(self, client: Any = None, **kwargs: Any) -> Any:
+    async def call(self, **kwargs: Any) -> Any:
         """
         Convert abstract prompt to OpenAI format and execute asynchronously.
 
         Args:
-            client: The OpenAI client to use for the API call. If None, a default client will be used.
-            model: The model to use for the completion. If None, the model selector will be used.
             **kwargs: Additional arguments to pass to the OpenAI API
 
         Returns:
-            The response from the OpenAI API. The format depends on the expected type:
+            The response from the LLM API. The format depends on the expected type:
             - For text: str
             - For JSON: dict or Pydantic model instance if a model class was specified
-            - For images: Image object or URL depending on the model
+            - For other types: depends on the provider's implementation
 
         Raises:
             ValueError: If the selected model is not valid for the given input/output
             RuntimeError: If there is an error calling the LLM API or processing the response
         """
         # Select the model
-        invoker, model = self._model_selector.select_model(self._messages, self._expect)
+        provider, model = self._model_selector.select_model(self._messages, self._expect)
+        global _TEMP_last_provider
+        _TEMP_last_provider = provider
+
+        # Validate the selection
+        provider.check_capabilities(model, self._messages, self._expect)
 
         # Call the API
-        return await invoker(
-            client=client,
-            messages=self._messages,
+        return await provider.prompt_via_api(
             model=model,
+            messages=self._messages,
             expect_type=self._expect,
             **kwargs,
         )

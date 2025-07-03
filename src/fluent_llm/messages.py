@@ -96,6 +96,23 @@ class ImageMessage(Message):
         return f"<{len(self.image_data or b'')} bytes of image data>"
 
     @property
+    def media_type(self) -> str:
+        """Return the media type of the image."""
+        return f"image/{self.image_path.suffix.lower()}"
+
+    @property
+    def base64_data(self) -> str:
+        """Return the image data as a base64-encoded data URL."""
+        if self.image_path is not None:
+            with open(self.image_path, "rb") as image_file:
+                image_data = image_file.read()
+        else:
+            image_data = self.image_data or b''
+
+        base64_encoded = base64.b64encode(image_data).decode("utf-8")
+        return base64_encoded
+
+    @property
     def base64_data_url(self) -> str:
         """Return the image data as a base64-encoded data URL."""
         if self.image_path is not None:
@@ -181,6 +198,10 @@ class MessageList(list[Message]):
     def merge_all_text(self) -> str:
         """Merge all text messages into a single string."""
         return "\n".join(msg.text for msg in self if isinstance(msg, (AgentMessage, TextMessage)))
+
+    def merge_all_agent(self) -> str:
+        """Merge all agent messages into a single string."""
+        return "\n".join(msg.text for msg in self if isinstance(msg, AgentMessage))
 
     def copy(self) -> 'MessageList':
         """Return a shallow copy of the MessageList.

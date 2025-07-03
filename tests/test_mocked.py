@@ -12,13 +12,12 @@ Covered surface areas:
 """
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 
-from fluent_llm import ResponseType
+from fluent_llm.messages import ResponseType
 from fluent_llm.builder import LLMPromptBuilder, llm
 from fluent_llm.usage_tracker import tracker
 
@@ -28,20 +27,25 @@ from fluent_llm.usage_tracker import tracker
 
 @pytest.fixture()
 def patch_call_llm_api(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
-    """Replace `call_llm_api` with an AsyncMock that returns minimal stubs."""
+    """Replace the OpenAI provider's prompt_via_api with an AsyncMock that returns minimal stubs."""
+    from fluent_llm.providers.openai.gpt import OpenAIProvider
 
-    async def _stub(*_args: Any, **kwargs: Any):
-        expect_type: ResponseType = kwargs["expect_type"]
+    async def _stub(*args, **kwargs):
+        # The first argument is 'self', which we can ignore
+        if len(args) > 1:
+            model, messages, expect_type = args[1:4]
+        else:
+            expect_type = kwargs.get('expect_type')
+            
         if expect_type is ResponseType.TEXT:
             return "MOCK_TEXT_RESPONSE"
         if expect_type is ResponseType.IMAGE:
-            return b"\x89PNG\r\n\x1a\n"  # PNG signature – sufficient for tests
-        raise NotImplementedError(expect_type)
+            return b"\x89PNG\r\n\x1a\n"  # PNG signature
+        raise NotImplementedError(f"Unsupported expect_type: {expect_type}")
 
-    mock = AsyncMock(side_effect=_stub)
-    # Patch at the invoker source *and* the alias imported into builder.py
-    monkeypatch.setattr("fluent_llm.openai.invoker.call_llm_api", mock, raising=True)
-    monkeypatch.setattr("fluent_llm.builder.call_llm_api", mock, raising=True)
+    mock = AsyncMock(spec=OpenAIProvider.prompt_via_api)
+    mock.side_effect = _stub
+    monkeypatch.setattr("fluent_llm.providers.openai.gpt.OpenAIProvider.prompt_via_api", mock)
     return mock
 
 # ---------------------------------------------------------------------------
@@ -73,57 +77,52 @@ async def test_text_generation(patch_call_llm_api: AsyncMock) -> None:
 @pytest.mark.asyncio
 async def test_image_generation(patch_call_llm_api: AsyncMock) -> None:
     """`ResponseType.IMAGE` returns image generation call with correct parameters."""
-    # Setup the mock to return a sample image generation response
-    mock_response = type('MockResponse', (), {
-        'status': 'success',
-        'output': [
-            type('MockOutput', (), {
-                'type': 'image_generation_call',
-                'image': b'\x89PNG\r\n\x1a\n',
-                'prompt': 'A test image',
-                'size': '1024x1024',
-                'quality': 'standard',
-                'style': 'vivid',
-            })
-        ]
-    })
-    patch_call_llm_api.return_value = mock_response
-    
-    # Make the API call
+    # Make the API call using the builder pattern with prompt_for_image()
     builder = LLMPromptBuilder()
-    result = builder.image("A test image")
-    
+    result = await builder.image("A test image").prompt_for_image()
+
     # Verify the mock was called with the correct parameters
-    patch_call_llm_api.assert_called_once()
-    _, kwargs = patch_call_llm_api.call_args
-    assert kwargs['expect_type'] == ResponseType.IMAGE
-    assert 'tools' in kwargs
-    assert kwargs['tools'] == [{'type': 'image_generation'}]
+    patch_call_llm_api.assert_awaited_once()
     
-    # Verify the response handling
-    assert hasattr(result, 'type')
-    assert result.type == 'image_generation_call'
-    assert hasattr(result, 'image')
-    assert result.image.startswith(b'\x89PNG')
+    # Get the arguments from the mock call
+    args, kwargs = patch_call_llm_api.await_args
+    
+    # Verify the expect_type is set to IMAGE
+    assert kwargs['expect_type'] == ResponseType.IMAGE
+    
+    # Verify the response is the raw image data
+    assert result == b"\x89PNG\r\n\x1a\n"
 
 
 def test_usage_stats_reset_and_track() -> None:
     """`tracker` should reset and accumulate usage statistics correctly."""
+    from fluent_llm.usage_tracker import UsageStats, UsageTracker
+    
+    # Create a new tracker for testing
+    test_tracker = UsageTracker()
+    
+    # Reset the tracker before starting
+    test_tracker.reset_usage()
+    
+    # Track usage for the same model
+    from fluent_llm.usage_tracker import UsageStats
+    
+    test_tracker.track_usage("gpt-4o", UsageStats(
+        input_tokens=10,
+        output_tokens=15,
+        total_tokens=25,
+        call_count=1
+    ))
 
-    class _Resp:  # minimal object with attributes expected by tracker
-        def __init__(self, model: str, in_t: int, out_t: int):
-            self.model = model
-            self.usage = type("usage", (), {
-                "input_tokens": in_t,
-                "output_tokens": out_t,
-                "total_tokens": in_t + out_t,
-            })()
-
-    tracker.reset_usage()
-    tracker.track_usage(_Resp("gpt-4o", 10, 15))
-    tracker.track_usage(_Resp("gpt-4o", 5, 5))
-
-    stats = tracker.get_usage("gpt-4o")
+    test_tracker.track_usage("gpt-4o", UsageStats(
+        input_tokens=5,
+        output_tokens=5,
+        total_tokens=10,
+        call_count=1
+    ))
+    
+    # Get and verify the stats
+    stats = test_tracker.get_usage("gpt-4o")
     assert stats["input_tokens"] == 15
     assert stats["output_tokens"] == 20
     assert stats["total_tokens"] == 35

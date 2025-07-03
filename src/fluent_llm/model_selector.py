@@ -8,11 +8,9 @@ from abc import ABC, abstractmethod
 from typing import Optional, Callable, Tuple
 
 from .messages import (
-    Message, MessageList, TextMessage, ImageMessage,
-    AudioMessage, ResponseType
+    MessageList, ResponseType
 )
-from .openai.invoker import call_llm_api
-from .openai.models import get_model_by_name
+from .providers.openai.gpt import OpenAIProvider
 
 
 class UnresolvableModelError(Exception):
@@ -56,7 +54,6 @@ class DefaultModelSelectionStrategy(ModelSelectionStrategy):
     3. If there's any image input: gpt-4o-mini
     4. Default: gpt-4o-mini
     """
-
     def select_model(
         self,
         messages: MessageList,
@@ -95,46 +92,6 @@ class DefaultModelSelectionStrategy(ModelSelectionStrategy):
             elif has_image:
                 model = "gpt-4o-mini"
 
-        self._validate_selection(model, messages, expect_type)
+        provider = OpenAIProvider()
 
-        return call_llm_api, model
-
-    def _validate_selection(
-        self,
-        model_name: str,
-        messages: MessageList,
-        expect_type: Optional[ResponseType] = None
-    ) -> None:
-        """
-        Validate that the selected model has all required capabilities for the current request.
-
-        Args:
-            model_name: Name of the model to validate
-            messages: MessageList containing the conversation history
-            expect_type: Expected response type
-
-        Raises:
-            ValueError: If the model doesn't support required capabilities
-        """
-        model = get_model_by_name(model_name)
-        if model is None:
-            raise ValueError(f"Model {model_name} not found")
-
-        # Validate model capabilities
-        if messages.has_text and not model.text_input:
-            raise ValueError(f"Model {model_name} does not support text input")
-
-        if expect_type == ResponseType.TEXT and not model.text_output:
-            raise ValueError(f"Model {model_name} does not support text output")
-
-        if messages.has_audio and not model.audio_input:
-            raise ValueError(f"Model {model_name} does not support audio input")
-
-        if expect_type == ResponseType.AUDIO and not model.audio_output:
-            raise ValueError(f"Model {model_name} does not support audio output")
-
-        if messages.has_image and not model.image_input:
-            raise ValueError(f"Model {model_name} does not support image input")
-
-        if expect_type == ResponseType.IMAGE and not model.image_output:
-            raise ValueError(f"Model {model_name} does not support image output")
+        return provider, model
