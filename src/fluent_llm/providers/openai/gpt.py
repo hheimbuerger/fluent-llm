@@ -155,6 +155,15 @@ class OpenAIProvider(LLMProvider):
         # Track API usage - pass the entire response object
         tracker.track_usage(response.model, response.usage)
 
+        # Verify finish_reason – only 'stop' is considered success.
+        finish_reason = getattr(response, "finish_reason", "stop")
+        if finish_reason != "stop":
+            if finish_reason == "length":
+                raise NotImplementedError(
+                    "OpenAI generation stopped due to length; continuation not implemented."
+                )
+            raise RuntimeError(f"OpenAI API returned unexpected finish_reason: {finish_reason!r}")
+
         # Handle TEXT output
         if expect_type == ResponseType.TEXT:
             # The responses API returns a list of choices, each with a message

@@ -60,12 +60,22 @@ class AnthropicProvider(LLMProvider):
 
         tracker.track_usage(model, response.usage)
 
-        # TODO: find documentation about the response format!
-        assert len(response.content) == 1
+        # Verify stop_reason – only 'end_turn' is considered success.
+        stop_reason = getattr(response, "stop_reason", None)
+        if stop_reason != "end_turn":
+            if stop_reason == "max_tokens":
+                # Continuation logic not yet implemented; treat as failure.
+                raise NotImplementedError(
+                    "Anthropic generation stopped due to max_tokens; continuation not implemented."
+                )
+            raise RuntimeError(f"Anthropic API returned unexpected stop_reason: {stop_reason!r}")
+
+        # Validate and extract the single text block.
+        if len(response.content) != 1:
+            raise RuntimeError(f"Expected exactly one content block, got {len(response.content)}")
         responseMessage = response.content[0]
-        assert responseMessage.__class__.__name__ == 'TextBlock'
-        assert responseMessage.type == 'text'
-        assert responseMessage.citations is None
+        if responseMessage.type != "text":
+            raise RuntimeError(f"Unexpected block type {responseMessage.type!r}, expected 'text'")
 
         return responseMessage.text
 
