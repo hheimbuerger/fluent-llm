@@ -94,7 +94,7 @@ async def test_image_generation_live():
     print(f"Generated image: {image.size[0]}x{image.size[1]} {image.format}")
 
     # Verify usage statistics
-    stats = llm.get_last_call_stats()
+    stats = llm.usage.generate_report()
     # TODO: ensure there are image generation and image output tokens in the last usage stats
     assert "No usage information" not in stats, "Should have usage information"
 
@@ -112,20 +112,32 @@ async def test_usage_stats_live():
     assert 'Berlin' in response
 
     # Get the usage stats
-    stats = llm.get_last_call_stats()
-
-    # Basic validation that stats were returned
-    assert stats
-    assert "No usage information" not in stats  # Should have usage info
+    assert llm.usage.cost.total_call_cost_usd > 0
+    assert len(str(llm.usage)) > 0
 
     # Check that we have both input and output tokens in the stats
-    has_input = any(token_type in stats for token_type in ("input_tokens", "prompt_tokens"))
-    has_output = any(token_type in stats for token_type in ("output_tokens", "completion_tokens"))
-    assert has_input, f"Expected input tokens in stats, got: {stats}"
-    assert has_output, f"Expected output tokens in stats, got: {stats}"
+    assert 'input_tokens' in llm.usage.cost.breakdown, f"Expected input tokens in cost breakdown, got: {llm.usage.cost}"
+    assert 'output_tokens' in llm.usage.cost.breakdown, f"Expected output tokens in cost breakdown, got: {llm.usage.cost}"
 
-    # Check that costs are included (should have a $ symbol)
-    assert "$" in stats, f"Expected cost information with $ in stats, got: {stats}"
+    # --- Case 2: image in -> text out
+    img_to_text = await llm\
+        .context("You received this painting from your client.")\
+        .image("tests/painting.png")\
+        .request("Please describe this painting briefly.")\
+        .prompt()
+    assert isinstance(img_to_text, str)
 
-    print("\nUsage stats:", stats)
-    print("Response:", response)
+    # Get the usage stats
+    assert llm.usage.cost.total_call_cost_usd > 0
+    assert len(str(llm.usage)) > 0
+
+    # --- Case 3: text in -> image out
+    generated_img = await llm\
+        .agent("You are an abstract artist.")\
+        .request("Create an abstract painting representing freedom.")\
+        .prompt_for_image()
+    assert isinstance(generated_img, Image)
+
+    # Get the usage stats
+    assert llm.usage.cost.total_call_cost_usd > 0
+    assert len(str(llm.usage)) > 0

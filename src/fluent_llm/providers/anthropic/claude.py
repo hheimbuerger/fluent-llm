@@ -9,13 +9,24 @@ import anthropic
 
 
 class AnthropicProvider(LLMProvider):
+    def get_token_type_to_price_mapping(self) -> dict:
+        """Get Anthropic-specific token type mapping.
+        
+        Returns:
+            Dictionary mapping Anthropic token types to pricing field base names.
+        """
+        return {
+            'input_tokens': 'price_per_million_text_tokens_input',
+            'output_tokens': 'price_per_million_text_tokens_output',
+        }
+    
     def get_models(self) -> Tuple[LLMModel]:
         return (
             LLMModel(
                 name="claude-sonnet-4",
                 text_input=True,
                 text_output=True,
-                image_input=False,
+                image_input=True,
                 image_output=False,
                 audio_input=False,
                 audio_output=False,
@@ -32,7 +43,7 @@ class AnthropicProvider(LLMProvider):
                 name="claude-opus-4",
                 text_input=True,
                 text_output=True,
-                image_input=False,
+                image_input=True,
                 image_output=False,
                 audio_input=False,
                 audio_output=False,
@@ -58,7 +69,7 @@ class AnthropicProvider(LLMProvider):
             messages=tuple(self._convert_messages_to_api_format(messages)),
         )
 
-        tracker.track_usage(model, response.usage)
+        tracker.track_usage(self, model, response.usage)
 
         # Verify stop_reason – only 'end_turn' is considered success.
         stop_reason = getattr(response, "stop_reason", None)
@@ -73,11 +84,11 @@ class AnthropicProvider(LLMProvider):
         # Validate and extract the single text block.
         if len(response.content) != 1:
             raise RuntimeError(f"Expected exactly one content block, got {len(response.content)}")
-        responseMessage = response.content[0]
-        if responseMessage.type != "text":
-            raise RuntimeError(f"Unexpected block type {responseMessage.type!r}, expected 'text'")
+        response_message = response.content[0]
+        if response_message.type != "text":
+            raise RuntimeError(f"Unexpected block type {response_message.type!r}, expected 'text'")
 
-        return responseMessage.text
+        return response_message.text
 
     def _convert_messages_to_api_format(self, messages: MessageList) -> tuple:
         """Generator for converting messages to the format required by the Anthropic API."""

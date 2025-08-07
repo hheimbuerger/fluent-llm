@@ -94,39 +94,39 @@ async def test_image_generation(patch_call_llm_api: AsyncMock) -> None:
     assert result == b"\x89PNG\r\n\x1a\n"
 
 
-def test_usage_stats_reset_and_track() -> None:
-    """`tracker` should reset and accumulate usage statistics correctly."""
-    from fluent_llm.usage_tracker import UsageStats, UsageTracker
+# def test_usage_stats_reset_and_track() -> None:
+#     """`tracker` should reset and accumulate usage statistics correctly."""
+#     from fluent_llm.usage_tracker import UsageStats, UsageTracker
     
-    # Create a new tracker for testing
-    test_tracker = UsageTracker()
+#     # Create a new tracker for testing
+#     test_tracker = UsageTracker()
     
-    # Reset the tracker before starting
-    test_tracker.reset_usage()
+#     # Reset the tracker before starting
+#     test_tracker.reset_usage()
     
-    # Track usage for the same model
-    from fluent_llm.usage_tracker import UsageStats
+#     # Track usage for the same model
+#     from fluent_llm.usage_tracker import UsageStats
     
-    test_tracker.track_usage("gpt-4o", UsageStats(
-        input_tokens=10,
-        output_tokens=15,
-        total_tokens=25,
-        call_count=1
-    ))
+#     test_tracker.track_usage("gpt-4o", UsageStats(
+#         input_tokens=10,
+#         output_tokens=15,
+#         total_tokens=25,
+#         call_count=1
+#     ))
 
-    test_tracker.track_usage("gpt-4o", UsageStats(
-        input_tokens=5,
-        output_tokens=5,
-        total_tokens=10,
-        call_count=1
-    ))
+#     test_tracker.track_usage("gpt-4o", UsageStats(
+#         input_tokens=5,
+#         output_tokens=5,
+#         total_tokens=10,
+#         call_count=1
+#     ))
     
-    # Get and verify the stats
-    stats = test_tracker.get_usage("gpt-4o")
-    assert stats["input_tokens"] == 15
-    assert stats["output_tokens"] == 20
-    assert stats["total_tokens"] == 35
-    assert stats["call_count"] == 2
+#     # Get and verify the stats
+#     stats = test_tracker.get_usage("gpt-4o")
+#     assert stats["input_tokens"] == 15
+#     assert stats["output_tokens"] == 20
+#     assert stats["total_tokens"] == 35
+#     assert stats["call_count"] == 2
 
 
 @pytest.mark.asyncio

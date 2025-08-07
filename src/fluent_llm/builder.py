@@ -31,6 +31,7 @@ from decimal import Decimal
 from .usage_tracker import tracker
 from .messages import TextMessage, AudioMessage, ImageMessage, AgentMessage, ResponseType, MessageList
 from .model_selector import ModelSelectionStrategy, DefaultModelSelectionStrategy
+from fluent_llm import usage_tracker
 
 __all__: Sequence[str] = [
     "llm",
@@ -157,85 +158,89 @@ class LLMPromptBuilder:
 
         return counts
 
-    def get_last_call_stats(self) -> str:
-        """Get token usage and price breakdown for the **last** API call as a string.
+    # def get_last_call_stats(self) -> str:
+    #     """Get token usage and price breakdown for the **last** API call as a string.
 
-        Uses ``usage_tracker.tracker`` to obtain the latest usage info recorded
-        by ``call_llm_api`` and looks up pricing in :data:`fluent_llm.openai.models.OPENAI_MODELS`.
+    #     Uses ``usage_tracker.tracker`` to obtain the latest usage info recorded
+    #     by ``call_llm_api`` and looks up pricing in :data:`fluent_llm.openai.models.OPENAI_MODELS`.
 
-        All non-zero token categories in the usage dictionary are included, including
-        nested fields. If any token category present in the usage stats cannot be
-        priced, a ``RuntimeError`` is raised to surface the missing information.
+    #     All non-zero token categories in the usage dictionary are included, including
+    #     nested fields. If any token category present in the usage stats cannot be
+    #     priced, a ``RuntimeError`` is raised to surface the missing information.
 
-        Returns:
-            A formatted string with token usage and pricing information.
-        """
-        usage = tracker.last_call_usage
-        if not usage:
-            return "[fluent-llm] No usage information available for last call."
+    #     Returns:
+    #         A formatted string with token usage and pricing information.
+    #     """
+    #     usage = tracker.last_call_usage
+    #     if not usage:
+    #         return "[fluent-llm] No usage information available for last call."
 
-        model_name: str = usage.get("model")  # type: ignore[arg-type]
-        global _TEMP_last_provider
-        model = _TEMP_last_provider.get_model_by_name(model_name)
-        if model is None:
-            raise RuntimeError(f"Pricing data for model '{model_name}' not found.")
+    #     model_name: str = usage.get("model")  # type: ignore[arg-type]
+    #     global _TEMP_last_provider
+    #     model = _TEMP_last_provider.get_model_by_name(model_name)
+    #     if model is None:
+    #         raise RuntimeError(f"Pricing data for model '{model_name}' not found.")
 
-        # Build a mapping of all possible token types to their prices
-        price_map: dict[str, Decimal | None] = {
-            # Core text pricing (OpenAI naming variations)
-            "input_tokens": model.price_per_million_text_tokens_input,
-            "prompt_tokens": model.price_per_million_text_tokens_input,  # Alias for compatibility
-            "output_tokens": model.price_per_million_text_tokens_output,
-            "completion_tokens": model.price_per_million_text_tokens_output,  # Alias for compatibility
-            # Image pricing (hypothetical keys)
-            "image_tokens_input": model.price_per_million_image_tokens_input,
-            "image_tokens_output": model.price_per_million_image_tokens_output,
-            # Audio pricing (hypothetical keys)
-            "audio_tokens_input": model.price_per_million_audio_tokens_input,
-            "audio_tokens_output": model.price_per_million_audio_tokens_output,
-        }
-        # Merge any custom / detailed pricing the model defines
-        price_map.update(model.additional_pricing)
+    #     # Build a mapping of all possible token types to their prices
+    #     price_map: dict[str, Decimal | None] = {
+    #         # Core text pricing (OpenAI naming variations)
+    #         "input_tokens": model.price_per_million_text_tokens_input,
+    #         "prompt_tokens": model.price_per_million_text_tokens_input,  # Alias for compatibility
+    #         "output_tokens": model.price_per_million_text_tokens_output,
+    #         "completion_tokens": model.price_per_million_text_tokens_output,  # Alias for compatibility
+    #         # Image pricing (hypothetical keys)
+    #         "image_tokens_input": model.price_per_million_image_tokens_input,
+    #         "image_tokens_output": model.price_per_million_image_tokens_output,
+    #         # Audio pricing (hypothetical keys)
+    #         "audio_tokens_input": model.price_per_million_audio_tokens_input,
+    #         "audio_tokens_output": model.price_per_million_audio_tokens_output,
+    #     }
+    #     # Merge any custom / detailed pricing the model defines
+    #     price_map.update(model.additional_pricing)
 
-        # Gather all token counts from the usage dictionary, including nested ones
-        token_counts = self._gather_token_counts(usage)
+    #     # Gather all token counts from the usage dictionary, including nested ones
+    #     token_counts = self._gather_token_counts(usage)
 
-        # Check that all token types have pricing
-        missing_pricing = []
-        for token_key, count in token_counts:
-            # Try to find a matching price key - either the full path or just the last segment
-            price_key = token_key
-            if price_key not in price_map:
-                # Try with just the last part of the path
-                last_part = token_key.split('.')[-1]
-                if last_part in price_map:
-                    price_key = last_part
+    #     # Check that all token types have pricing
+    #     missing_pricing = []
+    #     for token_key, count in token_counts:
+    #         # Try to find a matching price key - either the full path or just the last segment
+    #         price_key = token_key
+    #         if price_key not in price_map:
+    #             # Try with just the last part of the path
+    #             last_part = token_key.split('.')[-1]
+    #             if last_part in price_map:
+    #                 price_key = last_part
 
-            if price_key not in price_map or (isinstance(price_map[price_key], Decimal) and price_map[price_key].is_nan()):
-                missing_pricing.append((token_key, count))
+    #         if price_key not in price_map or (isinstance(price_map[price_key], Decimal) and price_map[price_key].is_nan()):
+    #             missing_pricing.append((token_key, count))
 
-        if missing_pricing:
-            missing_list = '\n'.join(f"- {key}: {count} tokens" for key, count in missing_pricing)
-            raise RuntimeError(
-                f"No pricing configured for the following token types:\n{missing_list}"
-            )
+    #     if missing_pricing:
+    #         missing_list = '\n'.join(f"- {key}: {count} tokens" for key, count in missing_pricing)
+    #         raise RuntimeError(
+    #             f"No pricing configured for the following token types:\n{missing_list}"
+    #         )
 
-        # Now format all the token counts with their prices
-        output = []
-        for token_key, count in token_counts:
-            # Try to find a matching price key - either the full path or just the last segment
-            price_key = token_key
-            if price_key not in price_map:
-                # Try with just the last part of the path
-                last_part = token_key.split('.')[-1]
-                if last_part in price_map:
-                    price_key = last_part
+    #     # Now format all the token counts with their prices
+    #     output = []
+    #     for token_key, count in token_counts:
+    #         # Try to find a matching price key - either the full path or just the last segment
+    #         price_key = token_key
+    #         if price_key not in price_map:
+    #             # Try with just the last part of the path
+    #             last_part = token_key.split('.')[-1]
+    #             if last_part in price_map:
+    #                 price_key = last_part
 
-            price_per_million = price_map[price_key]
-            cost = (Decimal(count) * price_per_million) / Decimal(1_000_000)
-            output.append(f"{token_key}: {count} tokens → ${cost:.6f}")
+    #         price_per_million = price_map[price_key]
+    #         cost = (Decimal(count) * price_per_million) / Decimal(1_000_000)
+    #         output.append(f"{token_key}: {count} tokens → ${cost:.6f}")
 
-        return "\n".join(output)
+    #     return "\n".join(output)
+
+    @property
+    def usage(self):
+        return usage_tracker.tracker
 
     # ------------------------------------------------------------------
     # Prompt-for-* convenience methods (public API)

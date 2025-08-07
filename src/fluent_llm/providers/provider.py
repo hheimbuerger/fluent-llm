@@ -43,6 +43,18 @@ class LLMProvider(ABC):
         """Make an async call to the provider's API with the given messages
         and return the appropriate response.
         The model is always inferred from the input and expected output."""
+    
+    @abstractmethod
+    def get_token_type_to_price_mapping(self) -> dict:
+        """Get the mapping from token type names to pricing field names.
+        
+        This maps token types that appear in usage details to the corresponding
+        pricing fields on the LLMModel. Override in subclasses for provider-specific mappings.
+        
+        Returns:
+            Dictionary mapping token type names to pricing field base names.
+            The base names will have '_input' or '_output' appended automatically.
+        """
 
     def check_capabilities(
             self,

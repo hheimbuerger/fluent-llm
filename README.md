@@ -92,6 +92,34 @@ assert isinstance(response, PIL.Image)
 response.show()
 ```
 
+### Usage tracking
+
+Usage tracking and price estimations for the last call are built-in.
+
+```python
+>>> llm.request('How are you?').prompt()
+"I'm doing well, thank you! How about you?"
+
+>>> print(llm.usage)
+=== Last API Call Usage ===
+Model: gpt-4o-mini-2024-07-18
+input_tokens: 11 tokens
+output_tokens: 12 tokens
+
+💰 Cost Breakdown:
+  input_tokens: 11 tokens → $0.000002
+  output_tokens: 12 tokens → $0.000007
+
+💵 Total Call Cost: $0.000009
+==============================
+
+>>> llm.usage.cost.total_call_cost_usd
+0.000009
+
+>>> llm.usage.cost.breakdown['input_tokens'].count
+11
+```
+
 ## Customization
 
 If the defaults are not sufficient, you can customize the behavior of the builder by creating your own `LLMPromptBuilder`, instead of using the `llm` global instance provided for convenience.

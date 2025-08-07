@@ -1,4 +1,4 @@
-from typing import Any, Type, Tuple
+from typing import Any, Type, Tuple, override
 from ...usage_tracker import tracker
 from ...messages import Message, AudioMessage, ImageMessage, ResponseType, TextMessage, AgentMessage, MessageList
 import openai
@@ -11,7 +11,7 @@ from ..provider import LLMProvider, LLMModel
 from decimal import Decimal
 
 
-class OpenAIProvider(LLMProvider):
+class OpenAIProvider(LLMProvider):    
     def get_models(self) -> Tuple[LLMModel]:
         return (
             LLMModel(
@@ -84,6 +84,22 @@ class OpenAIProvider(LLMProvider):
             ),
         )
 
+    def get_token_type_to_price_mapping(self) -> dict:
+        """Get OpenAI-specific token type mapping.
+        
+        Returns:
+            Dictionary mapping OpenAI token types to pricing field base names.
+        """
+        return {
+            'input_tokens': 'price_per_million_text_tokens_input',
+            'output_tokens': 'price_per_million_text_tokens_output',
+            'input_tokens_details.image_tokens': 'price_per_million_image_tokens_input',
+            'input_tokens_details.audio_tokens': 'price_per_million_audio_tokens_input',
+            'input_tokens_details.text_tokens': 'price_per_million_text_tokens_input',
+            'output_tokens_details.image_tokens': 'price_per_million_image_tokens_output',
+            'output_tokens_details.audio_tokens': 'price_per_million_audio_tokens_output',
+        }
+
     async def prompt_via_api(
         self,
         model: str,
@@ -125,7 +141,7 @@ class OpenAIProvider(LLMProvider):
                 **kwargs
             )
             # Track usage for image generation
-            tracker.track_usage(model, response.usage)  # FIXME: placeholder, because we need to rework the usage tracking from scratch next
+            tracker.track_usage(self, model, response.usage)
 
             if not hasattr(response, 'data') or not response.data:
                 raise ValueError("No data in response for image generation")
@@ -153,7 +169,7 @@ class OpenAIProvider(LLMProvider):
             raise RuntimeError(error_msg)
 
         # Track API usage - pass the entire response object
-        tracker.track_usage(response.model, response.usage)
+        tracker.track_usage(self, response.model, response.usage)
 
         # Verify finish_reason – only 'stop' is considered success.
         finish_reason = getattr(response, "finish_reason", "stop")
@@ -188,7 +204,7 @@ class OpenAIProvider(LLMProvider):
             return {"role": message.role.value, "content": message.content}
 
         elif isinstance(message, AudioMessage):
-            # In a real implementation, this would encode the audio file
+            # encode the audio file
             return {
                 "role": message.role.value,
                 "content": [
@@ -197,12 +213,14 @@ class OpenAIProvider(LLMProvider):
             }
 
         elif isinstance(message, ImageMessage):
-            # In a real implementation, this would encode the image file
+            # encode the image file
             return {
                 "role": message.role.value,
                 "content": [
                     {"type": "input_image", "image_url": message.base64_data_url}
                 ]
             }
+
+        raise ValueError(f"Unsupported message type: {type(message).__name__}")
 
         raise ValueError(f"Unsupported message type: {type(message).__name__}")
