@@ -49,11 +49,15 @@ class LLMPromptBuilder:
         *,
         messages: MessageList | None = None,
         expect: ResponseType | None = None,
-        model_selector: ModelSelectionStrategy | None = None
+        model_selector: ModelSelectionStrategy | None = None,
+        preferred_provider: str | None = None,
+        preferred_model: str | None = None
     ) -> None:
         self._messages: MessageList = messages or MessageList()
         self._expect: ResponseType = expect or ResponseType.TEXT
         self._model_selector: ModelSelectionStrategy = model_selector or DefaultModelSelectionStrategy()
+        self._preferred_provider: str | None = preferred_provider
+        self._preferred_model: str | None = preferred_model
 
     def _copy(self) -> "LLMPromptBuilder":
         """Create a copy of this builder with the same state."""
@@ -61,6 +65,8 @@ class LLMPromptBuilder:
             messages=self._messages.copy(),
             expect=self._expect,
             model_selector=self._model_selector,
+            preferred_provider=self._preferred_provider,
+            preferred_model=self._preferred_model,
         )
         return new_instance
 
@@ -121,6 +127,32 @@ class LLMPromptBuilder:
             new_instance._expect = response_type
         else:
             raise TypeError("expect() argument must be a ResponseType or a Pydantic BaseModel subclass.")
+        return new_instance
+
+    def provider(self, provider_name: str) -> "LLMPromptBuilder":
+        """Specify a preferred provider for this request.
+        
+        Args:
+            provider_name: Name of the provider (e.g., 'openai', 'anthropic')
+            
+        Returns:
+            A new LLMPromptBuilder instance with the provider preference set
+        """
+        new_instance = self._copy()
+        new_instance._preferred_provider = provider_name
+        return new_instance
+
+    def model(self, model_name: str) -> "LLMPromptBuilder":
+        """Specify a preferred model for this request.
+        
+        Args:
+            model_name: Name of the model (e.g., 'gpt-4o-mini', 'claude-3-sonnet')
+            
+        Returns:
+            A new LLMPromptBuilder instance with the model preference set
+        """
+        new_instance = self._copy()
+        new_instance._preferred_model = model_name
         return new_instance
 
     # ------------------------------------------------------------------
@@ -319,7 +351,12 @@ class LLMPromptBuilder:
             RuntimeError: If there is an error calling the LLM API or processing the response
         """
         # Select the model
-        provider, model = self._model_selector.select_model(self._messages, self._expect)
+        provider, model = self._model_selector.select_model(
+            self._messages, 
+            self._expect,
+            self._preferred_provider,
+            self._preferred_model
+        )
         global _TEMP_last_provider
         _TEMP_last_provider = provider
 

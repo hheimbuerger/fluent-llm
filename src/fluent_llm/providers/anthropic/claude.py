@@ -1,7 +1,7 @@
 from ..provider import LLMProvider, LLMModel
 from typing import Tuple, Any, Type
 from decimal import Decimal
-from ...messages import Message, MessageList, ResponseType, TextMessage, ImageMessage, AgentMessage
+from ...messages import MessageList, ResponseType, TextMessage, ImageMessage, AgentMessage
 from ...exceptions import *
 from ...usage_tracker import tracker
 from pydantic import BaseModel
@@ -11,7 +11,7 @@ import anthropic
 class AnthropicProvider(LLMProvider):
     def get_token_type_to_price_mapping(self) -> dict:
         """Get Anthropic-specific token type mapping.
-        
+
         Returns:
             Dictionary mapping Anthropic token types to pricing field base names.
         """
@@ -19,11 +19,11 @@ class AnthropicProvider(LLMProvider):
             'input_tokens': 'price_per_million_text_tokens_input',
             'output_tokens': 'price_per_million_text_tokens_output',
         }
-    
+
     def get_models(self) -> Tuple[LLMModel]:
         return (
             LLMModel(
-                name="claude-sonnet-4",
+                name="claude-sonnet-4-20250514",
                 text_input=True,
                 text_output=True,
                 image_input=True,
@@ -40,7 +40,7 @@ class AnthropicProvider(LLMProvider):
                 additional_pricing={},
             ),
             LLMModel(
-                name="claude-opus-4",
+                name="claude-opus-4-20250514",
                 text_input=True,
                 text_output=True,
                 image_input=True,
@@ -62,7 +62,7 @@ class AnthropicProvider(LLMProvider):
         client = anthropic.AsyncAnthropic()
 
         response = await client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=model,
             max_tokens=20000,
             temperature=1,
             system=messages.merge_all_agent(),

@@ -20,6 +20,7 @@ import pytest
 from fluent_llm.messages import ResponseType
 from fluent_llm.builder import LLMPromptBuilder, llm
 from fluent_llm.usage_tracker import tracker
+from fluent_llm.model_selector import UnresolvableModelError
 
 # ---------------------------------------------------------------------------
 # Fixture: patch the OpenAI invoker with an AsyncMock
@@ -146,3 +147,94 @@ def test_package_has_version() -> None:
     import importlib.metadata as _md
 
     assert _md.version("fluent-llm")
+
+
+# ---------------------------------------------------------------------------
+# Provider and Model Preference Tests
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def patch_anthropic_provider(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """Replace the Anthropic provider's prompt_via_api with an AsyncMock."""
+    from fluent_llm.providers.anthropic.claude import AnthropicProvider
+
+    async def _anthropic_stub(*args, **kwargs):
+        # The first argument is 'self', which we can ignore
+        if len(args) > 1:
+            model, messages, expect_type = args[1:4]
+        else:
+            expect_type = kwargs.get('expect_type')
+            
+        if expect_type is ResponseType.TEXT:
+            return "MOCK_ANTHROPIC_TEXT_RESPONSE"
+        raise NotImplementedError(f"Unsupported expect_type: {expect_type}")
+
+    mock = AsyncMock(spec=AnthropicProvider.prompt_via_api)
+    mock.side_effect = _anthropic_stub
+    monkeypatch.setattr("fluent_llm.providers.anthropic.claude.AnthropicProvider.prompt_via_api", mock)
+    return mock
+
+
+@pytest.mark.asyncio
+async def test_provider_preference_anthropic_text(patch_anthropic_provider: AsyncMock) -> None:
+    """Test that specifying 'anthropic' provider works for text requests."""
+    response = await llm \
+        .provider("anthropic") \
+        .request("Hello, how are you?") \
+        .prompt()
+    
+    assert response == "MOCK_ANTHROPIC_TEXT_RESPONSE"
+    # Verify the Anthropic provider was called
+    patch_anthropic_provider.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_provider_preference_impossible_capability() -> None:
+    """Test that requesting impossible capabilities raises UnresolvableModelError."""
+    with pytest.raises(UnresolvableModelError, match="has no models supporting required capabilities.*image output"):
+        await llm \
+            .provider("anthropic") \
+            .request("Create an image of a cat") \
+            .prompt_for_image()
+
+
+@pytest.mark.asyncio
+async def test_model_preference_specific_model(patch_call_llm_api: AsyncMock) -> None:
+    """Test that specifying a specific model works when capabilities match."""
+    response = await llm \
+        .model("gpt-4o-mini") \
+        .request("Hello, how are you?") \
+        .prompt()
+    
+    assert response == "MOCK_TEXT_RESPONSE"
+    patch_call_llm_api.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_model_preference_impossible_capability() -> None:
+    """Test that requesting impossible model capabilities raises UnresolvableModelError."""
+    with pytest.raises(UnresolvableModelError, match="Model.*does not support image output"):
+        await llm \
+            .model("gpt-4o-mini") \
+            .request("Create an image") \
+            .prompt_for_image()
+
+
+@pytest.mark.asyncio
+async def test_unknown_provider() -> None:
+    """Test that specifying an unknown provider raises UnresolvableModelError."""
+    with pytest.raises(UnresolvableModelError, match="Provider 'unknown' not supported"):
+        await llm \
+            .provider("unknown") \
+            .request("Hello") \
+            .prompt()
+
+
+@pytest.mark.asyncio
+async def test_unknown_model() -> None:
+    """Test that specifying an unknown model raises UnresolvableModelError."""
+    with pytest.raises(UnresolvableModelError, match="Model 'unknown-model' not found in any provider"):
+        await llm \
+            .model("unknown-model") \
+            .request("Hello") \
+            .prompt()

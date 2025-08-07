@@ -1,21 +1,11 @@
 import pytest
-from PIL.Image import Image
-from pydantic import BaseModel
-from fluent_llm.builder import LLMPromptBuilder
-from fluent_llm.model_selector import ModelSelectionStrategy
-from fluent_llm.providers.anthropic.claude import AnthropicProvider
+from fluent_llm import llm
 
 
 @pytest.fixture(scope="module", autouse=True)
 def anthropic_llm():
-    """Configure a separate builder instance with an Anthropic model selector."""
-    selector_class = type('', \
-                    (ModelSelectionStrategy,), \
-                    dict(
-                        select_model = lambda self, messages, expect_type: (AnthropicProvider(), "claude-sonnet-4",)
-                    )
-               )
-    return LLMPromptBuilder(model_selector=selector_class())
+    """"""
+    return llm.provider('anthropic')
 
 
 @pytest.mark.asyncio
