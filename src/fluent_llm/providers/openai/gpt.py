@@ -49,7 +49,7 @@ class OpenAIProvider(LLMProvider):
                 additional_pricing={},
             ),
             LLMModel(
-                name="gpt-4o-mini-audio",
+                name="gpt-4o-mini-audio-preview",
                 text_input=True,
                 image_input=False,
                 audio_input=True,
@@ -57,12 +57,12 @@ class OpenAIProvider(LLMProvider):
                 image_output=False,
                 audio_output=True,
                 structured_output=False,
-                price_per_million_text_tokens_input=Decimal("0.15"),  # FILL ME
-                price_per_million_text_tokens_output=Decimal("0.60"), # FILL ME
+                price_per_million_text_tokens_input=Decimal("0.15"),
+                price_per_million_text_tokens_output=Decimal("0.60"),
                 price_per_million_image_tokens_input=Decimal('NaN'),    # Not available
                 price_per_million_image_tokens_output=Decimal('NaN'),   # Not available
-                price_per_million_audio_tokens_input=Decimal("10.00"), # FILL ME
-                price_per_million_audio_tokens_output=Decimal("20.00"),# FILL ME
+                price_per_million_audio_tokens_input=Decimal("10.00"),
+                price_per_million_audio_tokens_output=Decimal("20.00"),
                 additional_pricing={},
             ),
             LLMModel(
@@ -114,6 +114,10 @@ class OpenAIProvider(LLMProvider):
         """
         # create client
         client = openai.AsyncOpenAI()
+
+        # fall back to the Chat Completion API for audio-in :roll:
+        if any(isinstance(msg, AudioMessage) for msg in messages):
+            return await self._prompt_via_chat_completion(model, messages, expect_type, **kwargs)
 
         # Prepare messages for the responses API
         openai_messages = [self._convert_to_openai_format(msg) for msg in messages]
@@ -198,6 +202,59 @@ class OpenAIProvider(LLMProvider):
 
         raise NotImplementedError(f"ResponseType {expect_type} not supported yet in call_llm_api.")
 
+    async def _prompt_via_chat_completion(
+        self,
+        model: str,
+        messages: MessageList,
+        expect_type: ResponseType | Type[BaseModel],
+        **kwargs: Any
+    ) -> Any:
+        """
+        Make an async call to the OpenAI Chat Completion API with the given messages and return the appropriate response.
+        This is a temporary implementation until audio is supported in the responses API.
+        Behaves exactly like prompt_via_api but uses chat completion instead of responses API.
+        """
+        # create client
+        client = openai.AsyncOpenAI()
+
+        # Prepare messages for the chat completion API
+        openai_messages = [self._convert_to_openai_format(msg) for msg in messages]
+
+        # Prepare API parameters
+        api_params = {
+            "model": model,
+            "messages": openai_messages,
+            **kwargs,
+        }
+
+        # Determine the type of request
+        is_structured_output = isinstance(expect_type, type) and issubclass(expect_type, BaseModel)
+        is_image_generation = expect_type == ResponseType.IMAGE
+
+        # these are not supported on the audio model we're on here
+        assert not is_image_generation
+        assert not is_structured_output
+
+        response = await client.chat.completions.create(**api_params)
+
+        # Track API usage
+        tracker.track_usage(self, response.model, response.usage)
+
+        # Verify finish_reason – only 'stop' is considered success.
+        finish_reason = response.choices[0].finish_reason
+        if finish_reason != "stop":
+            if finish_reason == "length":
+                raise NotImplementedError(
+                    "OpenAI generation stopped due to length; continuation not implemented."
+                )
+            raise RuntimeError(f"OpenAI API returned unexpected finish_reason: {finish_reason!r}")
+
+        # Handle TEXT output
+        if expect_type == ResponseType.TEXT:
+            return response.choices[0].message.content
+
+        raise NotImplementedError(f"ResponseType {expect_type} not supported yet in _prompt_via_chat_completion.")
+
     def _convert_to_openai_format(self, message: Message) -> dict:
         """Convert a Message to the OpenAI API format."""
         if isinstance(message, TextMessage) or isinstance(message, AgentMessage):
@@ -208,7 +265,11 @@ class OpenAIProvider(LLMProvider):
             return {
                 "role": message.role.value,
                 "content": [
-                    {"type": "audio", "audio_url": f"file://{message.content}"}
+                    {"type": "input_audio",
+                     "input_audio": {
+                        "data": message.content_b64,
+                        "format": "mp3"
+                     } }
                 ]
             }
 
@@ -220,7 +281,5 @@ class OpenAIProvider(LLMProvider):
                     {"type": "input_image", "image_url": message.base64_data_url}
                 ]
             }
-
-        raise ValueError(f"Unsupported message type: {type(message).__name__}")
 
         raise ValueError(f"Unsupported message type: {type(message).__name__}")

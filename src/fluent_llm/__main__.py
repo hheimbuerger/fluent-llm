@@ -34,17 +34,17 @@ def execute_llm_code(code: str) -> Any:
         return result
     except SyntaxError:
         # If it fails as an expression, try as a statement (for print, assignments, etc.)
-        try:
+        # try:
             compiled_code = compile(code, '<string>', 'exec')
             exec(compiled_code, namespace)
             # exec doesn't return a value, so we return None
             return None
-        except Exception as e:
-            print(f"Error executing code: {e}", file=sys.stderr)
-            sys.exit(1)
-    except Exception as e:
-        print(f"Error executing code: {e}", file=sys.stderr)
-        sys.exit(1)
+    #     except Exception as e:
+    #         print(f"Error executing code: {e}", file=sys.stderr)
+    #         sys.exit(1)
+    # except Exception as e:
+    #     print(f"Error executing code: {e}", file=sys.stderr)
+    #     sys.exit(1)
 
 
 def main() -> None:

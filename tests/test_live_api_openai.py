@@ -62,7 +62,7 @@ async def test_audio_in():
     """Live test: text generation with the fluent interface (real API)."""
     response = await llm\
         .agent("You are a biologist.")\
-        .audio("tests/maybe_cat.ogg")\
+        .audio("tests/maybe_cat.mp3")\
         .request("What animal is this?")\
         .prompt()
     assert isinstance(response, str)

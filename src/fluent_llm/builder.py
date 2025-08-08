@@ -93,8 +93,12 @@ class LLMPromptBuilder:
 
     def audio(self, path: str | pathlib.Path) -> LLMPromptBuilder:
         """Add an audio file to the request."""
+        path = pathlib.Path(path)
+        if path.suffix != '.mp3':
+            raise ValueError(f'only .mp3 files are supported, but {path} has extension {path.suffix}')
+
         new_instance = self._copy()
-        new_instance._messages.append(AudioMessage(audio_path=pathlib.Path(path)))
+        new_instance._messages.append(AudioMessage(audio_path=path))
         return new_instance
 
     def image(self, source: str | pathlib.Path | bytes) -> LLMPromptBuilder:

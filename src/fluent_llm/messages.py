@@ -61,6 +61,12 @@ class AudioMessage(Message):
         # In a real implementation, this would read and encode the audio file
         return str(self.audio_path)
 
+    @property
+    def content_b64(self) -> str:
+        with open(self.audio_path, "rb") as audio_file:
+            audio_data = audio_file.read()
+        return base64.b64encode(audio_data).decode("utf-8")
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "role": self.role.value,

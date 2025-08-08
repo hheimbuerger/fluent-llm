@@ -182,7 +182,7 @@ class DefaultModelSelectionStrategy(ModelSelectionStrategy):
             if has_audio:
                 if has_image:
                     raise UnresolvableModelError("Audio and image input are not supported by the same model.")
-                model = "gpt-4o-mini-audio"
+                model = "gpt-4o-mini-audio-preview"
             elif has_image:
                 model = "gpt-4o-mini"
 

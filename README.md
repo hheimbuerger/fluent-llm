@@ -17,20 +17,19 @@ Express every LLM interaction in your app prototypes in a single statement, with
 
 ## Setting API Keys
 
-Set your OpenAI API key before running any code that calls the API:
-
 ```bash
 # On Unix/macOS
 export OPENAI_API_KEY=sk-...
+export ANTHROPIC_API_KEY=sk-...
 
 # On Windows (cmd)
 set OPENAI_API_KEY=sk-...
+set ANTHROPIC_API_KEY=sk-...
 
 # On Windows (PowerShell)
 $env:OPENAI_API_KEY="sk-..."
+$env:ANTHROPIC_API_KEY="sk-..."
 ```
-
-The `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` environment variables are required for all live API calls.
 
 ## Prompt Builder
 
