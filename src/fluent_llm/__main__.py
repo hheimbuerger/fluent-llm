@@ -58,6 +58,11 @@ def main() -> None:
         help="Python code to execute (e.g., \"llm.request('Who are you?').prompt()\")"
     )
     parser.add_argument(
+        "--usage",
+        action="store_true",
+        help="Print usage information (tokens and pricing) after the result"
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"fluent-llm {getattr(__import__('fluent_llm'), '__version__', 'unknown')}"
@@ -69,6 +74,13 @@ def main() -> None:
     result = execute_llm_code(args.code)
     if result is not None:
         print(result)
+    
+    # Print usage information if requested
+    if args.usage:
+        try:
+            print("\n" + str(llm.usage))
+        except Exception as e:
+            print(f"\nUnable to retrieve usage information: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":
