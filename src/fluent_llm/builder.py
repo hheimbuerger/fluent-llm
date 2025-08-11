@@ -27,10 +27,9 @@ import inspect
 from .utils import asyncify
 
 from pydantic import BaseModel
-from decimal import Decimal
-from .usage_tracker import tracker
 from .messages import TextMessage, AudioMessage, ImageMessage, AgentMessage, ResponseType, MessageList
 from .model_selector import ModelSelectionStrategy, DefaultModelSelectionStrategy
+from .prompt import Prompt
 from fluent_llm import usage_tracker
 
 __all__: Sequence[str] = [
@@ -354,24 +353,24 @@ class LLMPromptBuilder:
             ValueError: If the selected model is not valid for the given input/output
             RuntimeError: If there is an error calling the LLM API or processing the response
         """
-        # Select the model
-        provider, model = self._model_selector.select_model(
-            self._messages, 
-            self._expect,
-            self._preferred_provider,
-            self._preferred_model
+        # Build Prompt and select model
+        p = Prompt(
+            messages=self._messages,
+            expect_type=self._expect,
+            preferred_provider=self._preferred_provider,
+            preferred_model=self._preferred_model,
         )
+        provider, model = self._model_selector.select_model(p)
         global _TEMP_last_provider
         _TEMP_last_provider = provider
 
         # Validate the selection
-        provider.check_capabilities(model, self._messages, self._expect)
+        provider.check_capabilities(model, p)
 
         # Call the API
         return await provider.prompt_via_api(
             model=model,
-            messages=self._messages,
-            expect_type=self._expect,
+            p=p,
             **kwargs,
         )
 

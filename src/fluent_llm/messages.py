@@ -2,8 +2,8 @@ from abc import ABC, abstractmethod
 from enum import Enum, auto
 from dataclasses import dataclass
 import pathlib
-from typing import Any, Type, TypeVar, Generic, List as ListType, overload
-from collections.abc import Iterable, Iterator
+from typing import Any, Type
+from collections.abc import Iterable
 import base64
 
 class Role(str, Enum):
@@ -104,7 +104,8 @@ class ImageMessage(Message):
     @property
     def media_type(self) -> str:
         """Return the media type of the image."""
-        return f"image/{self.image_path.suffix.lower()}"
+        # TODO: pretty creative way to determine media type...
+        return f"image/{self.image_path.suffix[1:].lower()}"
 
     @property
     def base64_data(self) -> str:
@@ -128,7 +129,7 @@ class ImageMessage(Message):
             image_data = self.image_data or b''
 
         base64_encoded = base64.b64encode(image_data).decode("utf-8")
-        return f"data:image/png;base64,{base64_encoded}"
+        return f"data:{self.media_type};base64,{base64_encoded}"
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the image message to a dictionary representation.

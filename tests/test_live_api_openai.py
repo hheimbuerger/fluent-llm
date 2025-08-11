@@ -58,6 +58,22 @@ async def test_image_in():
 
 
 @pytest.mark.asyncio
+async def test_image_in_structured_out():
+    class PaintingEvaluation(BaseModel):
+        museum_worthy: bool
+        reason: str
+
+    response = await llm \
+        .agent("You are an art evaluator.") \
+        .context("You received this painting and were tasked to evaluate whether it's museum-worthy.") \
+        .image("tests/painting.png") \
+        .prompt_for_type(PaintingEvaluation)
+    assert isinstance(response, PaintingEvaluation)
+    assert len(response.reason) > 0
+    print(response)
+
+
+@pytest.mark.asyncio
 async def test_audio_in():
     """Live test: text generation with the fluent interface (real API)."""
     response = await llm\

@@ -1,11 +1,12 @@
-from ..provider import LLMProvider, LLMModel
-from typing import Tuple, Any, Type
+from typing import Tuple, Any
 from decimal import Decimal
-from ...messages import MessageList, ResponseType, TextMessage, ImageMessage, AgentMessage
+import anthropic
+
+from ..provider import LLMProvider, LLMModel
+from ...messages import MessageList, TextMessage, ImageMessage, AgentMessage
 from ...exceptions import *
 from ...usage_tracker import tracker
-from pydantic import BaseModel
-import anthropic
+from ...prompt import Prompt
 
 
 class AnthropicProvider(LLMProvider):
@@ -58,15 +59,15 @@ class AnthropicProvider(LLMProvider):
             ),
         )
 
-    async def prompt_via_api(self, model: str, messages: MessageList, expect_type: ResponseType | Type[BaseModel], **kwargs: Any) -> Any:
+    async def prompt_via_api(self, model: str, p: Prompt, **kwargs: Any) -> Any:
         client = anthropic.AsyncAnthropic()
 
         response = await client.messages.create(
             model=model,
             max_tokens=20000,
             temperature=1,
-            system=messages.merge_all_agent(),
-            messages=tuple(self._convert_messages_to_api_format(messages)),
+            system=p.messages.merge_all_agent(),
+            messages=tuple(self._convert_messages_to_api_format(p.messages)),
         )
 
         tracker.track_usage(self, model, response.usage)

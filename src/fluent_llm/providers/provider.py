@@ -1,9 +1,8 @@
 from abc import ABC, abstractmethod
-from typing import Optional, NamedTuple, Tuple, Any, Type
+from typing import Optional, NamedTuple, Tuple, Any
 import re
 from decimal import Decimal
-from pydantic import BaseModel
-from ..messages import MessageList, ResponseType, TextMessage, ImageMessage, AudioMessage, AgentMessage
+from ..prompt import Prompt
 
 
 class LLMModel(NamedTuple):
@@ -36,12 +35,10 @@ class LLMProvider(ABC):
     async def prompt_via_api(
         self,
         model: str,
-        messages: MessageList,
-        expect_type: ResponseType | Type[BaseModel],
+        p: Prompt,
         **kwargs: Any
     ) -> Any:
-        """Make an async call to the provider's API with the given messages
-        and return the appropriate response.
+        """Make an async call to the provider's API with the given prompt and return the response.
         The model is always inferred from the input and expected output."""
     
     @abstractmethod
@@ -59,16 +56,14 @@ class LLMProvider(ABC):
     def check_capabilities(
             self,
             model_name: str,
-            messages: MessageList,
-            expect_type: ResponseType | Type[BaseModel]
+            p: Prompt,
         ) -> None:
         """
         Validate that the selected model has all required capabilities for the current request.
 
         Args:
             model_name: Name of the model to validate
-            messages: MessageList containing the conversation history
-            expect_type: Expected response type
+            p: Prompt containing the conversation history and expected response type
 
         Raises:
             ValueError: If the model doesn't support required capabilities
@@ -78,22 +73,22 @@ class LLMProvider(ABC):
             raise ValueError(f"Model {model_name} not found")
 
         # Validate model capabilities
-        if messages.has_text and not model.text_input:
+        if p.text_in and not model.text_input:
             raise ValueError(f"Model {model_name} does not support text input")
 
-        if expect_type == ResponseType.TEXT and not model.text_output:
+        if p.text_out and not model.text_output:
             raise ValueError(f"Model {model_name} does not support text output")
 
-        if messages.has_audio and not model.audio_input:
+        if p.audio_in and not model.audio_input:
             raise ValueError(f"Model {model_name} does not support audio input")
 
-        if expect_type == ResponseType.AUDIO and not model.audio_output:
+        if p.audio_out and not model.audio_output:
             raise ValueError(f"Model {model_name} does not support audio output")
 
-        if messages.has_image and not model.image_input:
+        if p.image_in and not model.image_input:
             raise ValueError(f"Model {model_name} does not support image input")
 
-        if expect_type == ResponseType.IMAGE and not model.image_output:
+        if p.image_out and not model.image_output:
             raise ValueError(f"Model {model_name} does not support image output")
 
     def normalize_model_name(self, model_name: str) -> str:

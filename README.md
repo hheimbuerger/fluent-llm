@@ -108,6 +108,23 @@ assert isinstance(response, PIL.Image)
 response.show()
 ```
 
+### Structured output
+
+```python
+from pydantic import BaseModel
+
+class PaintingEvaluation(BaseModel):
+    museum_worthy: bool
+    reason: str
+
+response = llm \
+    .agent("You are an art evaluator.") \
+    .context("You received this painting and were tasked to evaluate whether it's museum-worthy.") \
+    .image("painting.png") \
+    .prompt_for_type(PaintingEvaluation)
+print(response)
+```
+
 ### Usage tracking
 
 Usage tracking and price estimations for the last call are built-in.

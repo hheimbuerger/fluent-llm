@@ -5,12 +5,8 @@ This module provides an interface and implementations for model selection strate
 used in the LLM prompt building process.
 """
 from abc import ABC, abstractmethod
-from typing import Optional, Callable, Tuple
-from pydantic import BaseModel
-
-from .messages import (
-    MessageList, ResponseType
-)
+from typing import Callable, Tuple
+from .prompt import Prompt
 from .providers.openai.gpt import OpenAIProvider
 from .providers.anthropic.claude import AnthropicProvider
 
@@ -30,19 +26,13 @@ class ModelSelectionStrategy(ABC):
     @abstractmethod
     def select_model(
         self,
-        messages: MessageList,
-        expect_type: Optional[str] = None,
-        preferred_provider: Optional[str] = None,
-        preferred_model: Optional[str] = None
+        p: Prompt,
     ) -> Tuple[Callable, str]:
         """
         Select an appropriate model based on the input messages and expected output type.
 
         Args:
-            messages: List of message dictionaries containing the conversation history.
-            expect_type: The expected output type (e.g., 'text', 'image', 'audio').
-            preferred_provider: Preferred provider name (e.g., 'openai', 'anthropic').
-            preferred_model: Preferred model name (e.g., 'gpt-4o-mini', 'claude-3-sonnet').
+            p: Prompt object containing messages, expected type, and optional provider/model hints.
 
         Returns:
             The name of the selected model.
@@ -62,10 +52,7 @@ class DefaultModelSelectionStrategy(ModelSelectionStrategy):
     """
     def select_model(
         self,
-        messages: MessageList,
-        expect_type: Optional[ResponseType] = None,
-        preferred_provider: Optional[str] = None,
-        preferred_model: Optional[str] = None
+        p: Prompt,
     ) -> Tuple[Callable, str]:
         """
         Select the appropriate model based on message content and expected response type.
@@ -80,10 +67,8 @@ class DefaultModelSelectionStrategy(ModelSelectionStrategy):
            - Default: gpt-4o-mini
 
         Args:
-            messages: MessageList containing the conversation history
-            expect_type: The expected response type
-            preferred_provider: Preferred provider name (e.g., 'openai', 'anthropic')
-            preferred_model: Preferred model name (e.g., 'gpt-4o-mini', 'claude-3-sonnet')
+            p: Prompt containing the conversation history, expected response type,
+               and optional provider/model preferences
 
         Returns:
             A tuple of (provider_instance, model_name)
@@ -97,23 +82,17 @@ class DefaultModelSelectionStrategy(ModelSelectionStrategy):
             'anthropic': AnthropicProvider()
         }
 
-        # Determine required capabilities
-        has_audio = (expect_type == ResponseType.AUDIO) or messages.has_audio
-        has_image = messages.has_image
-        needs_image_output = expect_type == ResponseType.IMAGE
-        needs_audio_output = expect_type == ResponseType.AUDIO
-        needs_text_output = expect_type == ResponseType.TEXT or expect_type is None
-        needs_structured_output = isinstance(expect_type, type) and issubclass(expect_type, BaseModel)
+        # Determine required capabilities using Prompt helpers (use directly below)
 
         # If specific model is requested, validate it
-        if preferred_model:
+        if p.preferred_model:
             # Find which provider has this model
             selected_provider = None
             selected_model = None
 
             for provider_name, provider_instance in providers.items():
                 for model in provider_instance.get_models():
-                    if model.name == preferred_model:
+                    if model.name == p.preferred_model:
                         selected_provider = provider_instance
                         selected_model = model
                         break
@@ -121,50 +100,50 @@ class DefaultModelSelectionStrategy(ModelSelectionStrategy):
                     break
 
             if not selected_provider:
-                raise UnresolvableModelError(f"Model '{preferred_model}' not found in any provider")
+                raise UnresolvableModelError(f"Model '{p.preferred_model}' not found in any provider")
 
             # Validate capabilities
-            if has_image and not selected_model.image_input:
-                raise UnresolvableModelError(f"Model '{preferred_model}' does not support image input")
-            if has_audio and not selected_model.audio_input:
-                raise UnresolvableModelError(f"Model '{preferred_model}' does not support audio input")
-            if needs_image_output and not selected_model.image_output:
-                raise UnresolvableModelError(f"Model '{preferred_model}' does not support image output")
-            if needs_audio_output and not selected_model.audio_output:
-                raise UnresolvableModelError(f"Model '{preferred_model}' does not support audio output")
-            if needs_text_output and not selected_model.text_output:
-                raise UnresolvableModelError(f"Model '{preferred_model}' does not support text output")
+            if p.image_involved and not selected_model.image_input:
+                raise UnresolvableModelError(f"Model '{p.preferred_model}' does not support image input")
+            if p.audio_involved and not selected_model.audio_input:
+                raise UnresolvableModelError(f"Model '{p.preferred_model}' does not support audio input")
+            if p.image_out and not selected_model.image_output:
+                raise UnresolvableModelError(f"Model '{p.preferred_model}' does not support image output")
+            if p.audio_out and not selected_model.audio_output:
+                raise UnresolvableModelError(f"Model '{p.preferred_model}' does not support audio output")
+            if p.text_out and not selected_model.text_output:
+                raise UnresolvableModelError(f"Model '{p.preferred_model}' does not support text output")
 
-            return selected_provider, preferred_model
+            return selected_provider, p.preferred_model
 
         # If specific provider is requested, find best model from that provider
-        if preferred_provider:
-            if preferred_provider not in providers:
-                raise UnresolvableModelError(f"Provider '{preferred_provider}' not supported. Available: {list(providers.keys())}")
+        if p.preferred_provider:
+            if p.preferred_provider not in providers:
+                raise UnresolvableModelError(f"Provider '{p.preferred_provider}' not supported. Available: {list(providers.keys())}")
 
-            provider_instance = providers[preferred_provider]
+            provider_instance = providers[p.preferred_provider]
             available_models = provider_instance.get_models()
 
             # Find a suitable model from the preferred provider
             suitable_models = []
             for model in available_models:
-                if (not has_image or model.image_input) and \
-                   (not has_audio or model.audio_input) and \
-                   (not needs_image_output or model.image_output) and \
-                   (not needs_audio_output or model.audio_output) and \
-                   (not needs_text_output or model.text_output):
+                if (not p.image_involved or model.image_input) and \
+                   (not p.audio_involved or model.audio_input) and \
+                   (not p.image_out or model.image_output) and \
+                   (not p.audio_out or model.audio_output) and \
+                   (not (p.text_out or p.expect_type is None) or model.text_output):
                     suitable_models.append(model)
 
             if not suitable_models:
                 capabilities = []
-                if has_image: capabilities.append("image input")
-                if has_audio: capabilities.append("audio input")
-                if needs_image_output: capabilities.append("image output")
-                if needs_audio_output: capabilities.append("audio output")
-                if needs_text_output: capabilities.append("text output")
+                if p.image_involved: capabilities.append("image input")
+                if p.audio_involved: capabilities.append("audio input")
+                if p.image_out: capabilities.append("image output")
+                if p.audio_out: capabilities.append("audio output")
+                if p.text_out: capabilities.append("text output")
 
                 raise UnresolvableModelError(
-                    f"Provider '{preferred_provider}' has no models supporting required capabilities: {', '.join(capabilities)}"
+                    f"Provider '{p.preferred_provider}' has no models supporting required capabilities: {', '.join(capabilities)}"
                 )
 
             # Select the first suitable model (could be enhanced with better selection logic)
@@ -174,14 +153,14 @@ class DefaultModelSelectionStrategy(ModelSelectionStrategy):
         # === from here on actual autoselection algorithm, given no hints ===
 
         # Check for image output first
-        if needs_image_output:
-            assert not has_audio, "Audio input is not supported on image generating models."
+        if p.image_out:
+            assert not p.audio_involved, "Audio input is not supported on image generating models."
             model = "gpt-image-1"
 
         # Check for audio input or output
-        elif needs_audio_output or has_audio:
-            assert not has_image and not needs_image_output, "Image input/output is not supported on audio generating/processing models."
-            assert not needs_structured_output, "Structured output is not supported on audio generating/processing models."
+        elif p.audio_out or p.audio_involved:
+            assert not p.image_involved and not p.image_out, "Image input/output is not supported on audio generating/processing models."
+            assert not p.structured_out, "Structured output is not supported on audio generating/processing models."
             model = "gpt-4o-mini-audio-preview"
 
         else:

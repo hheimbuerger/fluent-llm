@@ -1,14 +1,14 @@
-from typing import Any, Type, Tuple, override
+from typing import Any, Tuple, override
 from ...usage_tracker import tracker
-from ...messages import Message, AudioMessage, ImageMessage, ResponseType, TextMessage, AgentMessage, MessageList
+from ...messages import Message, AudioMessage, ImageMessage, TextMessage, AgentMessage
 import openai
 import base64
 from io import BytesIO
 import PIL.Image
-from pydantic import BaseModel
 from ...exceptions import *
 from ..provider import LLMProvider, LLMModel
 from decimal import Decimal
+from ...prompt import Prompt
 
 
 class OpenAIProvider(LLMProvider):    
@@ -103,8 +103,7 @@ class OpenAIProvider(LLMProvider):
     async def prompt_via_api(
         self,
         model: str,
-        messages: MessageList,
-        expect_type: ResponseType | Type[BaseModel],
+        p: Prompt,
         **kwargs: Any
     ) -> Any:
         """
@@ -116,35 +115,30 @@ class OpenAIProvider(LLMProvider):
         client = openai.AsyncOpenAI()
 
         # Prepare messages for the responses API
-        openai_messages = [self._convert_to_openai_format(msg) for msg in messages]
-
-        # Determine the type of request
-        is_structured_output = isinstance(expect_type, type) and issubclass(expect_type, BaseModel)
-        is_image_generation = expect_type == ResponseType.IMAGE
-        is_audio_involved = any(isinstance(msg, AudioMessage) for msg in messages) or expect_type == ResponseType.AUDIO
+        openai_messages = [self._convert_to_openai_format(msg) for msg in p.messages]
 
         # Handle image generation using the dedicated images API
-        if is_image_generation:
+        if p.image_out:
             # Call the images API
             response = await client.images.generate(
                 model=model,
-                prompt=messages.merge_all_text(),
+                prompt=p.messages.merge_all_text(),
                 n=1,
                 quality="low",
                 size="1024x1024",
                 **kwargs
             )
 
-        elif is_audio_involved:
+        elif p.audio_involved:
             # fall back to the Chat Completion API for audio-in :roll:
             response = await client.chat.completions.create(
                 model=model,
                 messages=openai_messages,
-                modalities=['text', 'audio'] if expect_type == ResponseType.AUDIO else ['text'],
+                modalities=['text', 'audio'] if p.audio_out else ['text'],
                 audio={
                     "format": "wav",
                     "voice": "nova",    # TODO: pick voice
-                } if expect_type == ResponseType.AUDIO else None,
+                } if p.audio_out else None,
                 **kwargs,
             )
 
@@ -155,9 +149,9 @@ class OpenAIProvider(LLMProvider):
                 "input": openai_messages,
                 **kwargs,
             }
-            if is_structured_output:
+            if p.structured_out:
                 # For structured output, ensure we get JSON
-                api_params["text_format"] = expect_type
+                api_params["text_format"] = p.expect_type
                 response = await client.responses.parse(**api_params)
             else:
                 response = await client.responses.create(**api_params)
@@ -193,12 +187,12 @@ class OpenAIProvider(LLMProvider):
             raise RuntimeError(error_msg)
 
         # if every check passed, we can now extract and convert the result
-        return self._extract_result_from_response(response, expect_type)
+        return self._extract_result_from_response(response, p)
 
     def _extract_result_from_response(
         self,
         response: Any,   # TODO: figure out correct canonical types here: Response API + Chat Completion API + Image API
-        expect_type: ResponseType | Type[BaseModel]
+        p: Prompt,
     ) -> Any:
         """
         Extract the result from the OpenAI response based on the expected type.
@@ -211,7 +205,7 @@ class OpenAIProvider(LLMProvider):
             The extracted result from the response
         """
         # handle TEXT output
-        if expect_type == ResponseType.TEXT:
+        if p.text_out:
             # The Chat Completions API returns a list of choices, each with a message
             if isinstance(response, openai.types.chat.chat_completion.ChatCompletion):
                 assert len(response.choices) == 1
@@ -220,7 +214,7 @@ class OpenAIProvider(LLMProvider):
                 return response.output_text
 
         # handle JSON/structured output
-        if isinstance(expect_type, type) and issubclass(expect_type, BaseModel):
+        if p.structured_out:
             # Check for refusal in the response
             if hasattr(response, 'refusal') and response.refusal is not None:
                 raise LLMRefusalError(str(response.refusal))
@@ -231,7 +225,7 @@ class OpenAIProvider(LLMProvider):
             return response.output_parsed
 
         # handle IMAGE output
-        if expect_type == ResponseType.IMAGE:
+        if p.image_out:
             if not hasattr(response, 'data') or not response.data:
                 raise ValueError("No data in response for image generation")
 
@@ -243,7 +237,7 @@ class OpenAIProvider(LLMProvider):
                 return PIL.Image.open(BytesIO(image_data))
 
         # handle AUDIO output
-        elif expect_type == ResponseType.AUDIO:
+        elif p.audio_out:
             if not hasattr(response, 'choices') or not response.choices:
                 raise ValueError("No choices in response for audio generation")
 
@@ -258,7 +252,7 @@ class OpenAIProvider(LLMProvider):
             audio_data = base64.b64decode(message.audio.data)
             return (message.audio.transcript, audio_data)
 
-        raise NotImplementedError(f"ResponseType {expect_type} not supported yet in call_llm_api.")
+        raise NotImplementedError("The requested response type is not supported yet in call_llm_api.")
 
     def _convert_to_openai_format(self, message: Message) -> dict:
         """Convert a Message to the OpenAI API format."""

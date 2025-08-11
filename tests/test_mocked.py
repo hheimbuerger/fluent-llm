@@ -28,21 +28,28 @@ from fluent_llm.model_selector import UnresolvableModelError
 
 @pytest.fixture()
 def patch_call_llm_api(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
-    """Replace the OpenAI provider's prompt_via_api with an AsyncMock that returns minimal stubs."""
+    """Replace the OpenAI provider's prompt_via_api with an AsyncMock that returns minimal stubs.
+
+    New signature: prompt_via_api(self, *, model: str, p: Prompt, **kwargs)
+    """
     from fluent_llm.providers.openai.gpt import OpenAIProvider
 
     async def _stub(*args, **kwargs):
         # The first argument is 'self', which we can ignore
-        if len(args) > 1:
-            model, messages, expect_type = args[1:4]
-        else:
-            expect_type = kwargs.get('expect_type')
-            
-        if expect_type is ResponseType.TEXT:
+        # We expect model and p passed as keyword args in our code.
+        p = kwargs.get('p')
+        if p is None and len(args) >= 3:
+            # Fallback: positional after self and model
+            p = args[2]
+
+        if p is None:
+            raise AssertionError("Prompt 'p' not provided to prompt_via_api mock")
+
+        if p.text_out:
             return "MOCK_TEXT_RESPONSE"
-        if expect_type is ResponseType.IMAGE:
+        if p.image_out:
             return b"\x89PNG\r\n\x1a\n"  # PNG signature
-        raise NotImplementedError(f"Unsupported expect_type: {expect_type}")
+        raise NotImplementedError("Unsupported expected output in mock")
 
     mock = AsyncMock(spec=OpenAIProvider.prompt_via_api)
     mock.side_effect = _stub
@@ -72,7 +79,8 @@ async def test_text_generation(patch_call_llm_api: AsyncMock) -> None:
     assert response == "MOCK_TEXT_RESPONSE"
 
     patch_call_llm_api.assert_awaited_once()
-    assert patch_call_llm_api.await_args.kwargs["expect_type"] is ResponseType.TEXT
+    # Ensure Prompt p was passed and has the expected type
+    assert patch_call_llm_api.await_args.kwargs["p"].expect_type is ResponseType.TEXT
 
 
 @pytest.mark.asyncio
@@ -89,7 +97,7 @@ async def test_image_generation(patch_call_llm_api: AsyncMock) -> None:
     args, kwargs = patch_call_llm_api.await_args
     
     # Verify the expect_type is set to IMAGE
-    assert kwargs['expect_type'] == ResponseType.IMAGE
+    assert kwargs['p'].expect_type == ResponseType.IMAGE
     
     # Verify the response is the raw image data
     assert result == b"\x89PNG\r\n\x1a\n"
@@ -160,14 +168,14 @@ def patch_anthropic_provider(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
 
     async def _anthropic_stub(*args, **kwargs):
         # The first argument is 'self', which we can ignore
-        if len(args) > 1:
-            model, messages, expect_type = args[1:4]
-        else:
-            expect_type = kwargs.get('expect_type')
-            
-        if expect_type is ResponseType.TEXT:
+        p = kwargs.get('p')
+        if p is None and len(args) >= 3:
+            p = args[2]
+        if p is None:
+            raise AssertionError("Prompt 'p' not provided to Anthropic mock")
+        if p.text_out:
             return "MOCK_ANTHROPIC_TEXT_RESPONSE"
-        raise NotImplementedError(f"Unsupported expect_type: {expect_type}")
+        raise NotImplementedError("Unsupported expected output in Anthropic mock")
 
     mock = AsyncMock(spec=AnthropicProvider.prompt_via_api)
     mock.side_effect = _anthropic_stub
