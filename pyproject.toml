@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fluent-llm"
-version = "1.0.0"
+version = "1.1.0"
 description = "A fluent interface for working with LLMs, providing a clean and intuitive API for AI-powered applications."
 readme = "README.md"
 requires-python = ">=3.10"
