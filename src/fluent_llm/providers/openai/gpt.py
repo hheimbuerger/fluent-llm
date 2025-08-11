@@ -115,23 +115,13 @@ class OpenAIProvider(LLMProvider):
         # create client
         client = openai.AsyncOpenAI()
 
-        # fall back to the Chat Completion API for audio-in :roll:
-        if any(isinstance(msg, AudioMessage) for msg in messages):
-            return await self._prompt_via_chat_completion(model, messages, expect_type, **kwargs)
-
         # Prepare messages for the responses API
         openai_messages = [self._convert_to_openai_format(msg) for msg in messages]
-
-        # Prepare API parameters
-        api_params = {
-            "model": model,
-            "input": openai_messages,
-            **kwargs,
-        }
 
         # Determine the type of request
         is_structured_output = isinstance(expect_type, type) and issubclass(expect_type, BaseModel)
         is_image_generation = expect_type == ResponseType.IMAGE
+        is_audio_involved = any(isinstance(msg, AudioMessage) for msg in messages) or expect_type == ResponseType.AUDIO
 
         # Handle image generation using the dedicated images API
         if is_image_generation:
@@ -144,53 +134,93 @@ class OpenAIProvider(LLMProvider):
                 size="1024x1024",
                 **kwargs
             )
-            # Track usage for image generation
-            tracker.track_usage(self, model, response.usage)
 
-            if not hasattr(response, 'data') or not response.data:
-                raise ValueError("No data in response for image generation")
-
-            # The output should contain the image generation call
-            image_output = response.data[0].b64_json
-
-            # Convert base64 to Pillow Image
-            image_data = base64.b64decode(image_output)
-            return PIL.Image.open(BytesIO(image_data))
+        elif is_audio_involved:
+            # fall back to the Chat Completion API for audio-in :roll:
+            response = await client.chat.completions.create(
+                model=model,
+                messages=openai_messages,
+                modalities=['text', 'audio'] if expect_type == ResponseType.AUDIO else ['text'],
+                audio={
+                    "format": "wav",
+                    "voice": "nova",    # TODO: pick voice
+                } if expect_type == ResponseType.AUDIO else None,
+                **kwargs,
+            )
 
         # Handle non-image requests using the responses API
-        elif is_structured_output:
-            # For structured output, ensure we get JSON
-            api_params["text_format"] = expect_type
-            response = await client.responses.parse(**api_params)
         else:
-            response = await client.responses.create(**api_params)
-
-        # Check response status
-        if response.status != 'completed':
-            error_msg = f"API call failed with status: {response.status}"
-            if hasattr(response, 'error'):
-                error_msg += f" - {response.error}"
-            raise RuntimeError(error_msg)
+            api_params = {
+                "model": model,
+                "input": openai_messages,
+                **kwargs,
+            }
+            if is_structured_output:
+                # For structured output, ensure we get JSON
+                api_params["text_format"] = expect_type
+                response = await client.responses.parse(**api_params)
+            else:
+                response = await client.responses.create(**api_params)
 
         # Track API usage - pass the entire response object
-        tracker.track_usage(self, response.model, response.usage)
+        final_model = getattr(response, 'model', model)   # the Image API doesn't include the model in the response, all others do
+        tracker.track_usage(self, final_model, response.usage)
+
+        # Check response status and finish_reason of the different APIs
+        if isinstance(response, openai.types.responses.response.Response):   # Responses API
+            status = response.status
+            finish_reason = None   # I can't find the finish reason anywhere on this object
+        elif isinstance(response, openai.types.images_response.ImagesResponse):   # Image API
+            status = None   # the ImagesResponse has no status or reason at all
+            finish_reason = None
+        elif isinstance(response, openai.types.chat.chat_completion.ChatCompletion):   # Chat Completions API
+            status = None
+            finish_reason = (response.choices[0].finish_reason if len(response.choices) > 0 else None)
+        else:
+            raise NotImplementedError('Unexpected response type')
 
         # Verify finish_reason – only 'stop' is considered success.
-        finish_reason = getattr(response, "finish_reason", "stop")
-        if finish_reason != "stop":
+        if finish_reason is not None and finish_reason != "stop":
             if finish_reason == "length":
                 raise NotImplementedError(
                     "OpenAI generation stopped due to length; continuation not implemented."
                 )
             raise RuntimeError(f"OpenAI API returned unexpected finish_reason: {finish_reason!r}")
+        if status is not None and status != 'completed':
+            error_msg = f"API call failed with status: {status}"
+            if hasattr(response, 'error'):
+                error_msg += f" - {response.error}"
+            raise RuntimeError(error_msg)
 
-        # Handle TEXT output
+        # if every check passed, we can now extract and convert the result
+        return self._extract_result_from_response(response, expect_type)
+
+    def _extract_result_from_response(
+        self,
+        response: Any,   # TODO: figure out correct canonical types here: Response API + Chat Completion API + Image API
+        expect_type: ResponseType | Type[BaseModel]
+    ) -> Any:
+        """
+        Extract the result from the OpenAI response based on the expected type.
+
+        Args:
+            response: The OpenAI response object
+            expect_type: The expected type of the response
+
+        Returns:
+            The extracted result from the response
+        """
+        # handle TEXT output
         if expect_type == ResponseType.TEXT:
-            # The responses API returns a list of choices, each with a message
-            return response.output_text
+            # The Chat Completions API returns a list of choices, each with a message
+            if isinstance(response, openai.types.chat.chat_completion.ChatCompletion):
+                assert len(response.choices) == 1
+                return response.choices[0].message.content
+            else:
+                return response.output_text
 
-        # Handle JSON/structured output
-        if is_structured_output:
+        # handle JSON/structured output
+        if isinstance(expect_type, type) and issubclass(expect_type, BaseModel):
             # Check for refusal in the response
             if hasattr(response, 'refusal') and response.refusal is not None:
                 raise LLMRefusalError(str(response.refusal))
@@ -200,60 +230,35 @@ class OpenAIProvider(LLMProvider):
 
             return response.output_parsed
 
+        # handle IMAGE output
+        if expect_type == ResponseType.IMAGE:
+            if not hasattr(response, 'data') or not response.data:
+                raise ValueError("No data in response for image generation")
+
+            # The output should contain the image generation call
+            if hasattr(response, 'data') and len(response.data) == 1:
+                image_output = response.data[0].b64_json
+                image_data = base64.b64decode(image_output)
+                # Convert base64 to Pillow Image
+                return PIL.Image.open(BytesIO(image_data))
+
+        # handle AUDIO output
+        elif expect_type == ResponseType.AUDIO:
+            if not hasattr(response, 'choices') or not response.choices:
+                raise ValueError("No choices in response for audio generation")
+
+            choices = response.choices
+            if not len(choices) > 0 or not hasattr(choices[0], 'message') or not choices[0].message:
+                raise ValueError("No message in response for audio generation")
+
+            message = choices[0].message
+            if not hasattr(message, 'audio') or not message.audio:
+                raise ValueError("No audio in response for audio generation")
+
+            audio_data = base64.b64decode(message.audio.data)
+            return (message.audio.transcript, audio_data)
+
         raise NotImplementedError(f"ResponseType {expect_type} not supported yet in call_llm_api.")
-
-    async def _prompt_via_chat_completion(
-        self,
-        model: str,
-        messages: MessageList,
-        expect_type: ResponseType | Type[BaseModel],
-        **kwargs: Any
-    ) -> Any:
-        """
-        Make an async call to the OpenAI Chat Completion API with the given messages and return the appropriate response.
-        This is a temporary implementation until audio is supported in the responses API.
-        Behaves exactly like prompt_via_api but uses chat completion instead of responses API.
-        """
-        # create client
-        client = openai.AsyncOpenAI()
-
-        # Prepare messages for the chat completion API
-        openai_messages = [self._convert_to_openai_format(msg) for msg in messages]
-
-        # Prepare API parameters
-        api_params = {
-            "model": model,
-            "messages": openai_messages,
-            **kwargs,
-        }
-
-        # Determine the type of request
-        is_structured_output = isinstance(expect_type, type) and issubclass(expect_type, BaseModel)
-        is_image_generation = expect_type == ResponseType.IMAGE
-
-        # these are not supported on the audio model we're on here
-        assert not is_image_generation
-        assert not is_structured_output
-
-        response = await client.chat.completions.create(**api_params)
-
-        # Track API usage
-        tracker.track_usage(self, response.model, response.usage)
-
-        # Verify finish_reason – only 'stop' is considered success.
-        finish_reason = response.choices[0].finish_reason
-        if finish_reason != "stop":
-            if finish_reason == "length":
-                raise NotImplementedError(
-                    "OpenAI generation stopped due to length; continuation not implemented."
-                )
-            raise RuntimeError(f"OpenAI API returned unexpected finish_reason: {finish_reason!r}")
-
-        # Handle TEXT output
-        if expect_type == ResponseType.TEXT:
-            return response.choices[0].message.content
-
-        raise NotImplementedError(f"ResponseType {expect_type} not supported yet in _prompt_via_chat_completion.")
 
     def _convert_to_openai_format(self, message: Message) -> dict:
         """Convert a Message to the OpenAI API format."""

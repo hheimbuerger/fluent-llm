@@ -71,6 +71,19 @@ async def test_audio_in():
 
 
 @pytest.mark.asyncio
+async def test_audio_out():
+    """Live test: text generation with the fluent interface (real API)."""
+    response = await llm\
+        .agent("You are a cat.")\
+        .request("Meow!")\
+        .prompt_for_audio()
+    assert isinstance(response[0], str)
+    assert isinstance(response[1], bytes)
+    assert 'meow' in response[0].lower()
+    print("Response:", response)
+
+
+@pytest.mark.asyncio
 async def test_image_generation_live():
     """
     Live test: image generation with the fluent interface (real API).

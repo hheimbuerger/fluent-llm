@@ -6,6 +6,7 @@ used in the LLM prompt building process.
 """
 from abc import ABC, abstractmethod
 from typing import Optional, Callable, Tuple
+from pydantic import BaseModel
 
 from .messages import (
     MessageList, ResponseType
@@ -102,6 +103,7 @@ class DefaultModelSelectionStrategy(ModelSelectionStrategy):
         needs_image_output = expect_type == ResponseType.IMAGE
         needs_audio_output = expect_type == ResponseType.AUDIO
         needs_text_output = expect_type == ResponseType.TEXT or expect_type is None
+        needs_structured_output = isinstance(expect_type, type) and issubclass(expect_type, BaseModel)
 
         # If specific model is requested, validate it
         if preferred_model:
@@ -169,22 +171,21 @@ class DefaultModelSelectionStrategy(ModelSelectionStrategy):
             selected_model = suitable_models[0]
             return provider_instance, selected_model.name
 
-        # Check for image output first (highest priority)
-        if expect_type == ResponseType.IMAGE:
+        # === from here on actual autoselection algorithm, given no hints ===
+
+        # Check for image output first
+        if needs_image_output:
+            assert not has_audio, "Audio input is not supported on image generating models."
             model = "gpt-image-1"
 
-        else:
-            # Check for audio input/output and no image input
-            has_audio = (expect_type == ResponseType.AUDIO) or messages.has_audio
-            has_image = messages.has_image
+        # Check for audio input or output
+        elif needs_audio_output or has_audio:
+            assert not has_image and not needs_image_output, "Image input/output is not supported on audio generating/processing models."
+            assert not needs_structured_output, "Structured output is not supported on audio generating/processing models."
+            model = "gpt-4o-mini-audio-preview"
 
+        else:
             model = "gpt-4o-mini"
-            if has_audio:
-                if has_image:
-                    raise UnresolvableModelError("Audio and image input are not supported by the same model.")
-                model = "gpt-4o-mini-audio-preview"
-            elif has_image:
-                model = "gpt-4o-mini"
 
         provider = OpenAIProvider()
         return provider, model
