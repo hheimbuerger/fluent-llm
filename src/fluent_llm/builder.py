@@ -24,12 +24,14 @@ from __future__ import annotations
 import pathlib
 from typing import Any, Sequence, Type
 import inspect
+from dataclasses import dataclass
 from .utils import asyncify
 
 from pydantic import BaseModel
-from .messages import TextMessage, AudioMessage, ImageMessage, AgentMessage, ResponseType, MessageList
+from .messages import TextMessage, AudioMessage, ImageMessage, AgentMessage, ResponseType, MessageList, ToolCallMessage, ToolResultMessage
 from .model_selector import ModelSelectionStrategy, DefaultModelSelectionStrategy
 from .prompt import Prompt
+from .tools import Tool
 from fluent_llm import usage_tracker
 
 __all__: Sequence[str] = [
@@ -38,6 +40,14 @@ __all__: Sequence[str] = [
 
 
 _TEMP_last_provider = None
+
+
+@dataclass
+class ConversationState:
+    """Internal conversation state for tool calling conversations."""
+    api_messages: list[dict]  # Anthropic API format messages (includes user messages)
+    tools: list[Tool]
+    message_history: MessageList  # Our abstract message format
 
 
 class LLMPromptBuilder:
@@ -50,13 +60,17 @@ class LLMPromptBuilder:
         expect: ResponseType | None = None,
         model_selector: ModelSelectionStrategy | None = None,
         preferred_provider: str | None = None,
-        preferred_model: str | None = None
+        preferred_model: str | None = None,
+        tools: list[Tool] | None = None,
+        conversation_state: ConversationState | None = None
     ) -> None:
         self._messages: MessageList = messages or MessageList()
         self._expect: ResponseType = expect or ResponseType.TEXT
         self._model_selector: ModelSelectionStrategy = model_selector or DefaultModelSelectionStrategy()
         self._preferred_provider: str | None = preferred_provider
         self._preferred_model: str | None = preferred_model
+        self._tools: list[Tool] = tools or []
+        self._conversation_state: ConversationState | None = conversation_state
 
     def _copy(self) -> "LLMPromptBuilder":
         """Create a copy of this builder with the same state."""
@@ -66,6 +80,8 @@ class LLMPromptBuilder:
             model_selector=self._model_selector,
             preferred_provider=self._preferred_provider,
             preferred_model=self._preferred_model,
+            tools=self._tools.copy(),
+            conversation_state=self._conversation_state,
         )
         return new_instance
 
@@ -158,6 +174,102 @@ class LLMPromptBuilder:
         new_instance._preferred_model = model_name
         return new_instance
 
+    def tool(self, tool_function: Any) -> "LLMPromptBuilder":
+        """Add a single tool definition from function, auto-deriving metadata.
+        
+        Args:
+            tool_function: A callable function to be used as a tool
+            
+        Returns:
+            A new LLMPromptBuilder instance with the tool added
+        """
+        new_instance = self._copy()
+        tool = Tool.from_function(tool_function)
+        new_instance._tools.append(tool)
+        return new_instance
+
+    def tools(self, tool_functions: list[Any]) -> "LLMPromptBuilder":
+        """Add multiple tool definitions from functions, auto-deriving metadata.
+        
+        Args:
+            tool_functions: A list of callable functions to be used as tools
+            
+        Returns:
+            A new LLMPromptBuilder instance with the tools added
+        """
+        new_instance = self._copy()
+        for tool_function in tool_functions:
+            tool = Tool.from_function(tool_function)
+            new_instance._tools.append(tool)
+        return new_instance
+
+    # ------------------------------------------------------------------
+    # Conversation state management helpers
+    # ------------------------------------------------------------------
+    def _add_tool_call_to_conversation(self, tool_name: str, tool_call_id: str, arguments: dict) -> None:
+        """Add a tool call message to the conversation state."""
+        if self._conversation_state is None:
+            return
+        
+        tool_call_msg = ToolCallMessage(
+            tool_name=tool_name,
+            tool_call_id=tool_call_id,
+            arguments=arguments
+        )
+        
+        self._conversation_state.message_history.append(tool_call_msg)
+        self._conversation_state.api_messages.append(tool_call_msg.to_dict())
+    
+    def _add_tool_result_to_conversation(self, tool_call_id: str, result: Any) -> None:
+        """Add a tool result message to the conversation state."""
+        if self._conversation_state is None:
+            return
+        
+        tool_result_msg = ToolResultMessage(
+            tool_call_id=tool_call_id,
+            result=result
+        )
+        
+        self._conversation_state.message_history.append(tool_result_msg)
+        self._conversation_state.api_messages.append(tool_result_msg.to_dict())
+    
+    def _execute_tool_call(self, tool_name: str, arguments: dict) -> Any:
+        """Execute a tool call and return the result."""
+        # Find the tool by name
+        tool = None
+        for t in self._tools:
+            if t.name == tool_name:
+                tool = t
+                break
+        
+        if tool is None:
+            raise ValueError(f"Tool '{tool_name}' not found in available tools")
+        
+        try:
+            # Execute the tool function with the provided arguments
+            return tool.function(**arguments)
+        except Exception as e:
+            # Return error information that can be sent back to the model
+            return f"Error executing tool '{tool_name}': {str(e)}"
+
+    # ------------------------------------------------------------------
+    # Tool validation helpers
+    # ------------------------------------------------------------------
+    def _validate_no_tools_for_method(self, method_name: str) -> None:
+        """Validate that no tools are defined when using non-conversation methods.
+        
+        Args:
+            method_name: Name of the method being called
+            
+        Raises:
+            ValueError: If tools are defined
+        """
+        if self._tools:
+            raise ValueError(
+                f"Cannot use {method_name}() when tools are defined. "
+                f"Use prompt_conversation() instead for tool calling support."
+            )
+
     # ------------------------------------------------------------------
     # Pricing / stats helpers
     # ------------------------------------------------------------------
@@ -193,86 +305,6 @@ class LLMPromptBuilder:
 
         return counts
 
-    # def get_last_call_stats(self) -> str:
-    #     """Get token usage and price breakdown for the **last** API call as a string.
-
-    #     Uses ``usage_tracker.tracker`` to obtain the latest usage info recorded
-    #     by ``call_llm_api`` and looks up pricing in :data:`fluent_llm.openai.models.OPENAI_MODELS`.
-
-    #     All non-zero token categories in the usage dictionary are included, including
-    #     nested fields. If any token category present in the usage stats cannot be
-    #     priced, a ``RuntimeError`` is raised to surface the missing information.
-
-    #     Returns:
-    #         A formatted string with token usage and pricing information.
-    #     """
-    #     usage = tracker.last_call_usage
-    #     if not usage:
-    #         return "[fluent-llm] No usage information available for last call."
-
-    #     model_name: str = usage.get("model")  # type: ignore[arg-type]
-    #     global _TEMP_last_provider
-    #     model = _TEMP_last_provider.get_model_by_name(model_name)
-    #     if model is None:
-    #         raise RuntimeError(f"Pricing data for model '{model_name}' not found.")
-
-    #     # Build a mapping of all possible token types to their prices
-    #     price_map: dict[str, Decimal | None] = {
-    #         # Core text pricing (OpenAI naming variations)
-    #         "input_tokens": model.price_per_million_text_tokens_input,
-    #         "prompt_tokens": model.price_per_million_text_tokens_input,  # Alias for compatibility
-    #         "output_tokens": model.price_per_million_text_tokens_output,
-    #         "completion_tokens": model.price_per_million_text_tokens_output,  # Alias for compatibility
-    #         # Image pricing (hypothetical keys)
-    #         "image_tokens_input": model.price_per_million_image_tokens_input,
-    #         "image_tokens_output": model.price_per_million_image_tokens_output,
-    #         # Audio pricing (hypothetical keys)
-    #         "audio_tokens_input": model.price_per_million_audio_tokens_input,
-    #         "audio_tokens_output": model.price_per_million_audio_tokens_output,
-    #     }
-    #     # Merge any custom / detailed pricing the model defines
-    #     price_map.update(model.additional_pricing)
-
-    #     # Gather all token counts from the usage dictionary, including nested ones
-    #     token_counts = self._gather_token_counts(usage)
-
-    #     # Check that all token types have pricing
-    #     missing_pricing = []
-    #     for token_key, count in token_counts:
-    #         # Try to find a matching price key - either the full path or just the last segment
-    #         price_key = token_key
-    #         if price_key not in price_map:
-    #             # Try with just the last part of the path
-    #             last_part = token_key.split('.')[-1]
-    #             if last_part in price_map:
-    #                 price_key = last_part
-
-    #         if price_key not in price_map or (isinstance(price_map[price_key], Decimal) and price_map[price_key].is_nan()):
-    #             missing_pricing.append((token_key, count))
-
-    #     if missing_pricing:
-    #         missing_list = '\n'.join(f"- {key}: {count} tokens" for key, count in missing_pricing)
-    #         raise RuntimeError(
-    #             f"No pricing configured for the following token types:\n{missing_list}"
-    #         )
-
-    #     # Now format all the token counts with their prices
-    #     output = []
-    #     for token_key, count in token_counts:
-    #         # Try to find a matching price key - either the full path or just the last segment
-    #         price_key = token_key
-    #         if price_key not in price_map:
-    #             # Try with just the last part of the path
-    #             last_part = token_key.split('.')[-1]
-    #             if last_part in price_map:
-    #                 price_key = last_part
-
-    #         price_per_million = price_map[price_key]
-    #         cost = (Decimal(count) * price_per_million) / Decimal(1_000_000)
-    #         output.append(f"{token_key}: {count} tokens → ${cost:.6f}")
-
-    #     return "\n".join(output)
-
     @property
     def usage(self):
         return usage_tracker.tracker
@@ -283,6 +315,7 @@ class LLMPromptBuilder:
     @asyncify
     async def prompt_for_text(self, **kwargs: Any) -> Any:
         """Execute the prompt and return a text response."""
+        self._validate_no_tools_for_method("prompt_for_text")
         new_instance = self._copy()
         new_instance._expect = ResponseType.TEXT
         return await new_instance.call(**kwargs)
@@ -290,6 +323,7 @@ class LLMPromptBuilder:
     @asyncify
     async def prompt_for_image(self, **kwargs: Any) -> Any:
         """Execute the prompt and return an image response."""
+        self._validate_no_tools_for_method("prompt_for_image")
         new_instance = self._copy()
         new_instance._expect = ResponseType.IMAGE
         return await new_instance.call(**kwargs)
@@ -297,6 +331,7 @@ class LLMPromptBuilder:
     @asyncify
     async def prompt_for_audio(self, **kwargs: Any) -> Any:
         """Execute the prompt and return an audio response."""
+        self._validate_no_tools_for_method("prompt_for_audio")
         new_instance = self._copy()
         new_instance._expect = ResponseType.AUDIO
         return await new_instance.call(**kwargs)
@@ -324,6 +359,7 @@ class LLMPromptBuilder:
                 .prompt_for_type(EvaluationResult)
             ```
         """
+        self._validate_no_tools_for_method("prompt_for_type")
         new_instance = self._copy()
         new_instance._expect = response_type
         return await new_instance.call(**kwargs)
@@ -332,6 +368,58 @@ class LLMPromptBuilder:
     async def prompt(self, **kwargs: Any) -> Any:
         """Alias for prompt_for_text: execute the prompt and return a text response."""
         return await self.prompt_for_text(**kwargs)
+
+    @asyncify
+    async def prompt_conversation(self, message: str | None = None, **kwargs: Any) -> tuple[MessageList, "LLMPromptBuilder"]:
+        """Execute conversation with tool calling support.
+        
+        Similar to prompt_for_text but supports tool calling and returns conversation state.
+        Only supports text messages - no image, audio, or structured output support.
+        
+        Args:
+            message: Optional text message to add to conversation
+            **kwargs: Additional arguments passed to the provider API
+        
+        Returns:
+            Tuple of (message_list, continuation_builder) where message_list
+            contains all messages including tool calls and responses.
+            
+        Raises:
+            ValueError: If no tools are defined or if called without tools
+        """
+        if not self._tools:
+            raise ValueError("prompt_conversation() requires tools to be defined. Use tools() method first.")
+        
+        # Create a new instance for this conversation
+        new_instance = self._copy()
+        
+        # Initialize conversation state if not already present
+        if new_instance._conversation_state is None:
+            # Convert existing messages to API format for initial state
+            api_messages = []
+            for msg in new_instance._messages:
+                api_messages.append(msg.to_dict())
+            
+            new_instance._conversation_state = ConversationState(
+                api_messages=api_messages,
+                tools=new_instance._tools.copy(),
+                message_history=new_instance._messages.copy()
+            )
+        
+        # Add the user message if provided
+        if message is not None:
+            user_message = TextMessage(text=message)
+            new_instance._conversation_state.message_history.append(user_message)
+            new_instance._conversation_state.api_messages.append(user_message.to_dict())
+        
+        # For now, this is a basic implementation that doesn't actually call the API
+        # The full implementation with tool calling will be completed when provider
+        # integration is implemented in task 2
+        
+        # Create continuation builder with updated conversation state
+        continuation_builder = new_instance._copy()
+        
+        return new_instance._conversation_state.message_history, continuation_builder
 
     # ------------------------------------------------------------------
     # Execution
@@ -353,6 +441,9 @@ class LLMPromptBuilder:
             ValueError: If the selected model is not valid for the given input/output
             RuntimeError: If there is an error calling the LLM API or processing the response
         """
+        # Validate that tools aren't used with call()
+        self._validate_no_tools_for_method("call")
+        
         # Build Prompt and select model
         p = Prompt(
             messages=self._messages,
