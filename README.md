@@ -39,15 +39,15 @@ The following prompt components can be used in an arbitrary order and multiple t
 
 * `.agent(str)`: Sets the agent description, defines system behavior.
 * `.context(str)`: Passes textual context to the LLM.
-* `.request(str)`: Passes the main request to the LLM.
-* `.image(str)`: Passes an image to the LLM.
-* `.audio(str)`: Passes an audio file to the LLM.
+* `.request(str)`: Passes the main request to the LLM. (Identical to `.context()`, just used to clarify the intent.)
+* `.image(filename | PIL.Image)`: Passes an image to the LLM.
+* `.audio(filename | soundfile.SoundFile)`: Passes an audio file to the LLM.
 
 The prompt chain is terminated by the following methods:
 
 * `.prompt(): str`: Sends the prompt to the LLM and expects a text response.
 * `.prompt_for_image(): PIL.Image`: Sends the prompt to the LLM and expects an image response.
-* `.prompt_for_audio(): soundfile.SoundFile`: Sends the prompt to the LLM and expects an audio response.
+* *[to be implemented]* ~~`.prompt_for_audio(): soundfile.SoundFile`: Sends the prompt to the LLM and expects an audio response.~~
 * `.prompt_for_structured_output(pydantic_model): BaseModel`: Sends the prompt to the LLM and expects a structured response.
 
 They will either return the desired response if processing was successful, or raise an exception otherwise.

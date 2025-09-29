@@ -139,6 +139,7 @@ class OpenAIProvider(LLMProvider):
                     "format": "wav",
                     "voice": "nova",    # TODO: pick voice
                 } if p.audio_out else None,
+                store=True,
                 **kwargs,
             )
 

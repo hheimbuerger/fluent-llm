@@ -71,15 +71,19 @@ class UsageTracker:
         # TODO: add here for Anthropic: cache_creation_input_tokens, cache_read_input_tokens, server_tool_use
 
         # Extract and flatten input token details
-        if hasattr(usage, 'input_tokens_details'):
-            input_details_iter = getattr(usage.input_tokens_details, 'items', usage.input_tokens_details)
+        # Handle both Responses API format (input_tokens_details) and Chat Completions API format (prompt_tokens_details)
+        input_details = getattr(usage, 'input_tokens_details', None) or getattr(usage, 'prompt_tokens_details', None)
+        if input_details:
+            input_details_iter = getattr(input_details, 'items', input_details) if hasattr(input_details, 'items') else input_details.__dict__.items()
             for detail_key, count in input_details_iter:
                 if isinstance(count, int) and count > 0:
                     usage_dict[f'input_tokens_details.{detail_key}'] = count
 
         # Extract and flatten output token details
-        if hasattr(usage, 'output_tokens_details'):   # yes, at least the OpenAI API sometimes doesn't have this!
-            output_details_iter = getattr(usage.output_tokens_details, 'items', usage.output_tokens_details)
+        # Handle both Responses API format (output_tokens_details) and Chat Completions API format (completion_tokens_details)
+        output_details = getattr(usage, 'output_tokens_details', None) or getattr(usage, 'completion_tokens_details', None)
+        if output_details:   # yes, at least the OpenAI API sometimes doesn't have this!
+            output_details_iter = getattr(output_details, 'items', output_details) if hasattr(output_details, 'items') else output_details.__dict__.items()
             for detail_key, count in output_details_iter:
                 if isinstance(count, int) and count > 0:
                     usage_dict[f'output_tokens_details.{detail_key}'] = count
@@ -184,10 +188,6 @@ class UsageTracker:
 
         result.write("=== Last API Call Usage ===\n")
         result.write(f"Model: {self._last_call.model}\n")
-
-        # Show token counts from the flattened usage dictionary
-        for usage_descriptor, count in self._last_call.usage_dict.items():
-            result.write(f"{usage_descriptor}: {count:,} tokens\n")
 
         result.write("\n💰 Cost Breakdown:\n")
         for usage_descriptor, details in cost_info.breakdown.items():

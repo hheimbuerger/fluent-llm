@@ -54,6 +54,7 @@ async def test_image_in():
         .request("Please evaluate this painting and state your opinion whether it's museum-worthy.")\
         .prompt()
     assert isinstance(response, str)
+    assert llm.usage.cost.breakdown['input_tokens_details.image_tokens'].count > 0
     print("Text response:", response)
 
 
@@ -70,37 +71,12 @@ async def test_image_in_structured_out():
         .prompt_for_type(PaintingEvaluation)
     assert isinstance(response, PaintingEvaluation)
     assert len(response.reason) > 0
+    assert llm.usage.cost.breakdown['input_tokens_details.image_tokens'].count > 0
     print(response)
 
 
 @pytest.mark.asyncio
-async def test_audio_in():
-    """Live test: text generation with the fluent interface (real API)."""
-    response = await llm\
-        .agent("You are a biologist.")\
-        .audio("tests/maybe_cat.mp3")\
-        .request("What animal is this?")\
-        .prompt()
-    assert isinstance(response, str)
-    assert 'cat' in response
-    print("Text response:", response)
-
-
-@pytest.mark.asyncio
-async def test_audio_out():
-    """Live test: text generation with the fluent interface (real API)."""
-    response = await llm\
-        .agent("You are a cat.")\
-        .request("Meow!")\
-        .prompt_for_audio()
-    assert isinstance(response[0], str)
-    assert isinstance(response[1], bytes)
-    assert 'meow' in response[0].lower()
-    print("Response:", response)
-
-
-@pytest.mark.asyncio
-async def test_image_generation_live():
+async def test_image_generation():
     """
     Live test: image generation with the fluent interface (real API).
 
@@ -122,17 +98,42 @@ async def test_image_generation_live():
     assert image.format in ['PNG', 'JPEG', 'WEBP'], f"Unexpected image format: {image.format}"
     print(f"Generated image: {image.size[0]}x{image.size[1]} {image.format}")
 
-    # Verify usage statistics
-    stats = llm.usage.generate_report()
-    # TODO: ensure there are image generation and image output tokens in the last usage stats
-    assert "No usage information" not in stats, "Should have usage information"
+    assert llm.usage.cost.breakdown['output_tokens_details.image_tokens'].count > 0
 
     # Optionally display the image (uncomment if running interactively)
     # img.show()
 
 
 @pytest.mark.asyncio
-async def test_usage_stats_live():
+async def test_audio_in():
+    """Live test: text generation with the fluent interface (real API)."""
+    response = await llm\
+        .agent("You are a biologist.")\
+        .audio("tests/maybe_cat.mp3")\
+        .request("What animal is this?")\
+        .prompt()
+    assert isinstance(response, str)
+    assert 'cat' in response
+    assert llm.usage.cost.breakdown['input_tokens_details.audio_tokens'].count > 0
+    print("Text response:", response)
+
+
+@pytest.mark.asyncio
+async def test_audio_out():
+    """Live test: text generation with the fluent interface (real API)."""
+    response = await llm\
+        .agent("You are a cat.")\
+        .request("Meow!")\
+        .prompt_for_audio()
+    assert isinstance(response[0], str)
+    assert isinstance(response[1], bytes)
+    assert 'meow' in response[0].lower()
+    assert llm.usage.cost.breakdown['output_tokens_details.audio_tokens'].count > 0
+    print("Response:", response)
+
+
+@pytest.mark.asyncio
+async def test_usage_stats():
     """Live test: verify that get_last_call_stats works after an API call."""
     # Make a simple API call
     response = await llm\
