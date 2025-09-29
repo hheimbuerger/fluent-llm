@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Type
+from typing import Optional, Type, List
 from pydantic import BaseModel
 
 from .messages import MessageList, ResponseType
@@ -17,11 +17,15 @@ class Prompt:
                      or a Pydantic BaseModel subclass for structured output.
         preferred_provider: Optional provider hint (e.g. 'openai', 'anthropic').
         preferred_model: Optional model hint (e.g. 'gpt-4o-mini').
+        tools: Optional list of tools available for the conversation.
+        is_conversation: Whether this prompt is part of a conversation flow.
     """
     messages: MessageList
     expect_type: ResponseType | Type[BaseModel]
     preferred_provider: Optional[str] = None
     preferred_model: Optional[str] = None
+    tools: Optional[List] = None  # Using List instead of List[Tool] to avoid circular import
+    is_conversation: bool = False
 
     # -------- Convenience capabilities --------
     @property
@@ -64,3 +68,9 @@ class Prompt:
     @property
     def text_involved(self) -> bool:
         return self.text_in or self.text_out
+
+    # -------- Tool helpers --------
+    @property
+    def has_tools(self) -> bool:
+        """Check if tools are defined for this prompt."""
+        return self.tools is not None and len(self.tools) > 0

@@ -45,9 +45,9 @@ _TEMP_last_provider = None
 @dataclass
 class ConversationState:
     """Internal conversation state for tool calling conversations."""
-    api_messages: list[dict]  # Anthropic API format messages (includes user messages)
+    message_history: MessageList  # Our abstract message format (returned to user)
+    internal_session: list[dict]  # Internal session messages in provider format
     tools: list[Tool]
-    message_history: MessageList  # Our abstract message format
 
 
 class LLMPromptBuilder:
@@ -133,7 +133,7 @@ class LLMPromptBuilder:
         """Attach an image file to the request (basic vision support)."""
         return self.image(path)
 
-    def expect(self, response_type: ResponseType | Type[BaseModel]) -> "LLMPromptBuilder":
+    def expect(self, response_type: ResponseType | Type[BaseModel]) -> LLMPromptBuilder:
         """
         Specify the expected response type.
         Accepts either a ResponseType enum or a Pydantic BaseModel subclass for structured outputs.
@@ -148,7 +148,7 @@ class LLMPromptBuilder:
             raise TypeError("expect() argument must be a ResponseType or a Pydantic BaseModel subclass.")
         return new_instance
 
-    def provider(self, provider_name: str) -> "LLMPromptBuilder":
+    def provider(self, provider_name: str) -> LLMPromptBuilder:
         """Specify a preferred provider for this request.
         
         Args:
@@ -161,7 +161,7 @@ class LLMPromptBuilder:
         new_instance._preferred_provider = provider_name
         return new_instance
 
-    def model(self, model_name: str) -> "LLMPromptBuilder":
+    def model(self, model_name: str) -> LLMPromptBuilder:
         """Specify a preferred model for this request.
         
         Args:
@@ -174,7 +174,7 @@ class LLMPromptBuilder:
         new_instance._preferred_model = model_name
         return new_instance
 
-    def tool(self, tool_function: Any) -> "LLMPromptBuilder":
+    def tool(self, tool_function: Any) -> LLMPromptBuilder:
         """Add a single tool definition from function, auto-deriving metadata.
         
         Args:
@@ -188,7 +188,7 @@ class LLMPromptBuilder:
         new_instance._tools.append(tool)
         return new_instance
 
-    def tools(self, tool_functions: list[Any]) -> "LLMPromptBuilder":
+    def tools(self, tool_functions: list[Any]) -> LLMPromptBuilder:
         """Add multiple tool definitions from functions, auto-deriving metadata.
         
         Args:
@@ -371,9 +371,9 @@ class LLMPromptBuilder:
 
     @asyncify
     async def prompt_conversation(self, message: str | None = None, **kwargs: Any) -> tuple[MessageList, "LLMPromptBuilder"]:
-        """Execute conversation with tool calling support.
+        """Execute conversation with optional tool calling support.
         
-        Similar to prompt_for_text but supports tool calling and returns conversation state.
+        Similar to prompt_for_text but supports conversations and optional tool calling.
         Only supports text messages - no image, audio, or structured output support.
         
         Args:
@@ -383,41 +383,75 @@ class LLMPromptBuilder:
         Returns:
             Tuple of (message_list, continuation_builder) where message_list
             contains all messages including tool calls and responses.
-            
-        Raises:
-            ValueError: If no tools are defined or if called without tools
         """
-        if not self._tools:
-            raise ValueError("prompt_conversation() requires tools to be defined. Use tools() method first.")
-        
+
         # Create a new instance for this conversation
         new_instance = self._copy()
         
         # Initialize conversation state if not already present
         if new_instance._conversation_state is None:
-            # Convert existing messages to API format for initial state
-            api_messages = []
+            # Convert existing messages to provider format for initial state
+            internal_session = []
             for msg in new_instance._messages:
-                api_messages.append(msg.to_dict())
+                internal_session.append(msg.to_dict())
             
             new_instance._conversation_state = ConversationState(
-                api_messages=api_messages,
-                tools=new_instance._tools.copy(),
-                message_history=new_instance._messages.copy()
+                message_history=new_instance._messages.copy(),
+                internal_session=internal_session,
+                tools=new_instance._tools.copy()
             )
         
         # Add the user message if provided
         if message is not None:
             user_message = TextMessage(text=message)
             new_instance._conversation_state.message_history.append(user_message)
-            new_instance._conversation_state.api_messages.append(user_message.to_dict())
+            new_instance._conversation_state.internal_session.append(user_message.to_dict())
         
-        # For now, this is a basic implementation that doesn't actually call the API
-        # The full implementation with tool calling will be completed when provider
-        # integration is implemented in task 2
+        # Build Prompt for model selection and API call
+        p = Prompt(
+            messages=MessageList(new_instance._conversation_state.message_history),
+            expect_type=ResponseType.TEXT,  # Conversations are text-only for now
+            preferred_provider=new_instance._preferred_provider,
+            preferred_model=new_instance._preferred_model,
+            tools=new_instance._tools,
+            is_conversation=True,
+        )
+        
+        # Select model and provider
+        provider, model = new_instance._model_selector.select_model(p)
+        
+        # Check if provider supports tools (only if tools are defined)
+        if self._tools and (not hasattr(provider, 'supports_tools') or not provider.supports_tools()):
+            raise ValueError(
+                f"Provider {type(provider).__name__} does not support tool calling. "
+                f"Tool calling is currently only supported with Anthropic provider."
+            )
+        
+        # Validate capabilities
+        provider.check_capabilities(model, p)
+        
+        # Make the API call
+        try:
+            response_text = await provider.prompt_via_api(
+                model=model, 
+                p=p, 
+                conversation_state=new_instance._conversation_state,
+                **kwargs
+            )
+        except Exception as e:
+            # Re-raise with more context about the conversation state
+            raise RuntimeError(f"Error during tool calling conversation: {str(e)}") from e
+        
+        # Add the final response to conversation history
+        # Note: Tool calls and tool results should already be added by the provider
+        from .messages import Role
+        response_message = TextMessage(text=response_text, role=Role.ASSISTANT)
+        new_instance._conversation_state.message_history.append(response_message)
+        new_instance._conversation_state.internal_session.append(response_message.to_dict())
         
         # Create continuation builder with updated conversation state
         continuation_builder = new_instance._copy()
+        continuation_builder._conversation_state = new_instance._conversation_state
         
         return new_instance._conversation_state.message_history, continuation_builder
 
@@ -450,6 +484,8 @@ class LLMPromptBuilder:
             expect_type=self._expect,
             preferred_provider=self._preferred_provider,
             preferred_model=self._preferred_model,
+            tools=self._tools if self._tools else None,
+            is_conversation=False,
         )
         provider, model = self._model_selector.select_model(p)
         global _TEMP_last_provider
@@ -462,6 +498,7 @@ class LLMPromptBuilder:
         return await provider.prompt_via_api(
             model=model,
             p=p,
+            conversation_state=None,
             **kwargs,
         )
 

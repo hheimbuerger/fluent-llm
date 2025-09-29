@@ -36,14 +36,14 @@
     - Handle tool call and result message injection
     - _Requirements: 2.3, 2.4_
 
-- [ ] 2. Implement provider integration and testing
-  - [ ] 2.1 Update model selection strategy for tool support
+- [x] 2. Implement provider integration and testing
+  - [x] 2.1 Update model selection strategy for tool support
     - Modify `DefaultModelSelectionStrategy` in `src/fluent_llm/model_selector.py`
     - Add logic to prefer Anthropic provider when tools are present
     - Add logic to prefer Anthropic when `prompt_conversation()` is used
     - _Requirements: 4.1, 4.2_
 
-  - [ ] 2.2 Extend Anthropic provider with tool calling support
+  - [x] 2.2 Extend Anthropic provider with tool calling support
     - Add `supports_tools()` method to `AnthropicProvider`
     - Implement tool calling in `prompt_via_api()` method
     - Handle tool call parsing from Anthropic responses
@@ -51,14 +51,14 @@
     - Support multiple tool calls in single response
     - _Requirements: 4.1, 4.4, 4.5_
 
-  - [ ] 2.3 Add error handling for tool calling
+  - [x] 2.3 Add error handling for tool calling
     - Handle tool execution failures gracefully
     - Provide clear errors for unsupported providers
     - Validate tool function signatures
     - Handle API errors during tool calling
     - _Requirements: 2.5, 4.3_
 
-  - [ ] 2.4 Write comprehensive unit test for tool calling conversation
+  - [x] 2.4 Write comprehensive unit test for tool calling conversation
     - Create test with simple tool function (e.g., get_weather)
     - Test complete conversation flow with tool calls
     - Test conversation continuation

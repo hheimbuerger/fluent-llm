@@ -15,21 +15,9 @@ Express every LLM interaction in your app prototypes in a single statement, with
 - **Automatic coroutines** Can be used both in async and sync contexts.
 - **Modern Python:** Type hints, async/await, and dataclasses throughout.
 
-## Setting API Keys
+## Examples
 
-```bash
-# On Unix/macOS
-export OPENAI_API_KEY=sk-...
-export ANTHROPIC_API_KEY=sk-...
-
-# On Windows (cmd)
-set OPENAI_API_KEY=sk-...
-set ANTHROPIC_API_KEY=sk-...
-
-# On Windows (PowerShell)
-$env:OPENAI_API_KEY="sk-..."
-$env:ANTHROPIC_API_KEY="sk-..."
-```
+TBD three good examples, a simple one, maybe one with audio, one with tool calling?
 
 ## Prompt Builder
 
@@ -51,6 +39,28 @@ The prompt chain is terminated by the following methods:
 * `.prompt_for_structured_output(pydantic_model): BaseModel`: Sends the prompt to the LLM and expects a structured response.
 
 They will either return the desired response if processing was successful, or raise an exception otherwise.
+
+## Getting Started
+
+### Install with uv
+
+TBD
+
+### Setting API Keys
+
+```bash
+# On Unix/macOS
+export OPENAI_API_KEY=sk-...
+export ANTHROPIC_API_KEY=sk-...
+
+# On Windows (cmd)
+set OPENAI_API_KEY=sk-...
+set ANTHROPIC_API_KEY=sk-...
+
+# On Windows (PowerShell)
+$env:OPENAI_API_KEY="sk-..."
+$env:ANTHROPIC_API_KEY="sk-..."
+```
 
 ## Usage
 

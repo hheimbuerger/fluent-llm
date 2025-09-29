@@ -36,6 +36,9 @@ class Tool:
         Raises:
             ValueError: If the function lacks proper type annotations or docstring.
         """
+        # Validate function signature
+        _validate_tool_function(func)
+        
         name = func.__name__
         description = func.__doc__ or f"Tool: {func.__name__}"
         schema = generate_tool_schema(func)
@@ -92,6 +95,48 @@ def generate_tool_schema(func: Callable[..., Any]) -> dict:
         "properties": properties,
         "required": required
     }
+
+
+def _validate_tool_function(func: Callable[..., Any]) -> None:
+    """Validate that a function is suitable for use as a tool.
+    
+    Args:
+        func: The function to validate.
+        
+    Raises:
+        ValueError: If the function is not suitable for tool use.
+    """
+    if not callable(func):
+        raise ValueError(f"Tool must be callable, got {type(func)}")
+    
+    if not func.__name__:
+        raise ValueError("Tool function must have a name")
+    
+    # Check for reserved names that might conflict with system functions
+    reserved_names = {'help', 'exit', 'quit', 'print', 'input'}
+    if func.__name__ in reserved_names:
+        raise ValueError(f"Tool name '{func.__name__}' is reserved and cannot be used")
+    
+    # Validate function signature
+    sig = inspect.signature(func)
+    type_hints = get_type_hints(func)
+    
+    # Check that all parameters have type annotations
+    for param_name, param in sig.parameters.items():
+        if param_name not in type_hints:
+            raise ValueError(
+                f"Parameter '{param_name}' in tool function '{func.__name__}' lacks type annotation. "
+                f"All tool parameters must have type annotations for schema generation."
+            )
+    
+    # Warn about missing docstring
+    if not func.__doc__ or not func.__doc__.strip():
+        import warnings
+        warnings.warn(
+            f"Tool function '{func.__name__}' lacks a docstring. "
+            f"Adding a docstring will help the AI understand when to use this tool.",
+            UserWarning
+        )
 
 
 def _is_optional_type(param_type: type) -> bool:

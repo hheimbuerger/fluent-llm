@@ -36,6 +36,7 @@ class LLMProvider(ABC):
         self,
         model: str,
         p: Prompt,
+        conversation_state=None,
         **kwargs: Any
     ) -> Any:
         """Make an async call to the provider's API with the given prompt and return the response.

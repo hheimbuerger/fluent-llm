@@ -152,6 +152,19 @@ class DefaultModelSelectionStrategy(ModelSelectionStrategy):
 
         # === from here on actual autoselection algorithm, given no hints ===
 
+        # Prefer Anthropic when tools are present or when using conversation mode
+        if p.has_tools or p.is_conversation:
+            # Use Anthropic for tool calling and conversations
+            provider = AnthropicProvider()
+            
+            # Select appropriate Anthropic model based on capabilities
+            if p.image_involved:
+                model = "claude-3-5-sonnet-20241022"  # Supports vision
+            else:
+                model = "claude-3-5-haiku-20241022"  # Faster for text-only
+            
+            return provider, model
+
         # Check for image output first
         if p.image_out:
             assert not p.audio_involved, "Audio input is not supported on image generating models."

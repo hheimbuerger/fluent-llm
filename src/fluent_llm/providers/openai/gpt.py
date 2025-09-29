@@ -104,6 +104,7 @@ class OpenAIProvider(LLMProvider):
         self,
         model: str,
         p: Prompt,
+        conversation_state=None,
         **kwargs: Any
     ) -> Any:
         """
