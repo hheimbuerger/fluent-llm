@@ -45,7 +45,8 @@ async def test_simple_tool_calling():
             llm
             .agent("You are a helpful assistant")
             .tools([get_weather])
-            .prompt_conversation("What's the weather in Paris?")
+            .request("What's the weather in Paris?")
+            .prompt_agentically(max_calls=5)
         )
         
         # Basic verification
@@ -73,9 +74,11 @@ async def test_tool_validation_error():
 async def test_unsupported_provider():
     """Test error when using tools with unsupported provider."""
     with pytest.raises(ValueError, match="does not support tool calling"):
-        await (
+        conversation = (
             llm
             .provider("openai")
             .tools([get_weather])
-            .prompt_conversation("What's the weather?")
+            .request("What's the weather?")
+            .prompt_conversation()
         )
+        await conversation.__anext__()

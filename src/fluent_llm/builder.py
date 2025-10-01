@@ -22,13 +22,13 @@ print(response)
 from __future__ import annotations
 
 import pathlib
-from typing import Any, Sequence, Type
+from typing import Any, Sequence, Type, AsyncGenerator
 import inspect
 from dataclasses import dataclass
 from .utils import asyncify
 
 from pydantic import BaseModel
-from .messages import TextMessage, AudioMessage, ImageMessage, AgentMessage, ResponseType, MessageList, ToolCallMessage, ToolResultMessage
+from .messages import TextMessage, AudioMessage, ImageMessage, AgentMessage, ResponseType, MessageList, ToolCallMessage, Role
 from .model_selector import ModelSelectionStrategy, DefaultModelSelectionStrategy
 from .prompt import Prompt
 from .tools import Tool
@@ -48,6 +48,110 @@ class ConversationState:
     message_history: MessageList  # Our abstract message format (returned to user)
     internal_session: list[dict]  # Internal session messages in provider format
     tools: list[Tool]
+
+
+class ConversationGenerator:
+    """Async generator wrapper for conversation handling with continuation builder access."""
+    
+    def __init__(self, builder: "LLMPromptBuilder", **kwargs):
+        self.builder = builder
+        self.kwargs = kwargs
+        self.llm_continuation: "LLMPromptBuilder" | None = None
+        self._generator = None
+    
+    def __aiter__(self):
+        return self
+    
+    async def __anext__(self):
+        if self._generator is None:
+            self._generator = self._create_generator()
+        
+        try:
+            return await self._generator.__anext__()
+        except StopAsyncIteration:
+            # Generator is exhausted, continuation builder should be available
+            raise
+    
+    async def _create_generator(self):
+        """Create the actual async generator for conversation handling."""
+        # Initialize conversation state using existing method
+        conversation_state = self.builder._get_or_create_conversation_state()
+        
+        # Main conversation loop
+        while True:
+            # Build prompt and make API call
+            p = Prompt(
+                messages=MessageList(conversation_state.message_history),
+                expect_type=ResponseType.TEXT,
+                preferred_provider=self.builder._preferred_provider,
+                preferred_model=self.builder._preferred_model,
+                tools=self.builder._tools,
+                is_conversation=True,
+            )
+            
+            provider, model = self.builder._model_selector.select_model(p)
+            
+            # Check if provider supports tools (only if tools are defined)
+            if self.builder._tools and (not hasattr(provider, 'supports_tools') or not provider.supports_tools()):
+                raise ValueError(
+                    f"Provider {type(provider).__name__} does not support tool calling. "
+                    f"Tool calling is currently only supported with Anthropic provider."
+                )
+            
+            # Validate capabilities
+            provider.check_capabilities(model, p)
+            
+            # Make API call
+            response = await provider.prompt_via_api(
+                model=model, 
+                p=p, 
+                conversation_state=conversation_state,
+                **self.kwargs
+            )
+
+            # Process response - check if it contains tool calls
+            if isinstance(response, dict) and response.get('tool_calls'):
+                # Handle tool calls from dict response
+                for tool_call in response['tool_calls']:
+                    tool_name = tool_call["name"]
+                    tool_id = tool_call["id"]
+                    tool_args = tool_call.get("input", tool_call.get("arguments", {}))
+                    
+                    # Execute tool and get result/error tuple
+                    result, error = self.builder._execute_tool_call(tool_name, tool_args)
+                    
+                    # Create unified tool call message
+                    tool_message = ToolCallMessage(
+                        message=response.get('text', ""),
+                        tool_name=tool_name,
+                        tool_call_id=tool_id,
+                        arguments=tool_args,
+                        result=result,
+                        error=error
+                    )
+                    
+                    conversation_state.message_history.append(tool_message)
+                    conversation_state.internal_session.append(tool_message.to_dict())
+                    yield tool_message
+                    
+                # Continue conversation with tool results
+                continue
+            else:
+                # Regular text response - end of conversation
+                if isinstance(response, dict):
+                    text_content = response.get('text', str(response))
+                else:
+                    text_content = str(response)
+                    
+                text_message = TextMessage(text=text_content, role=Role.ASSISTANT)
+                conversation_state.message_history.append(text_message)
+                conversation_state.internal_session.append(text_message.to_dict())
+                yield text_message
+                
+                # Create continuation builder and store it
+                self.llm_continuation = self.builder._copy()
+                self.llm_continuation._conversation_state = conversation_state
+                return
 
 
 class LLMPromptBuilder:
@@ -88,22 +192,22 @@ class LLMPromptBuilder:
     # ------------------------------------------------------------------
     # Chainable mutators
     # ------------------------------------------------------------------
-    def agent(self, prompt: str) -> LLMPromptBuilder:
+    def agent(self, text: str) -> LLMPromptBuilder:
         """Add a *system* role message describing the agent/persona."""
         new_instance = self._copy()
-        new_instance._messages.append(AgentMessage(text=prompt))
+        new_instance._messages.append(AgentMessage(text=text.strip()))
         return new_instance
 
-    def context(self, content: str) -> LLMPromptBuilder:
+    def context(self, text: str) -> LLMPromptBuilder:
         """Add background context (user role)."""
         new_instance = self._copy()
-        new_instance._messages.append(TextMessage(text=content))
+        new_instance._messages.append(TextMessage(text=text.strip()))
         return new_instance
 
-    def request(self, content: str) -> LLMPromptBuilder:
+    def request(self, text: str) -> LLMPromptBuilder:
         """Add the primary user request message."""
         new_instance = self._copy()
-        new_instance._messages.append(TextMessage(text=content))
+        new_instance._messages.append(TextMessage(text=text.strip()))
         return new_instance
 
     def audio(self, path: str | pathlib.Path) -> LLMPromptBuilder:
@@ -206,6 +310,22 @@ class LLMPromptBuilder:
     # ------------------------------------------------------------------
     # Conversation state management helpers
     # ------------------------------------------------------------------
+    def _get_or_create_conversation_state(self) -> ConversationState:
+        """Get existing conversation state or create a new one."""
+        if self._conversation_state is None:
+            # Convert existing messages to provider format for initial state
+            internal_session = []
+            for msg in self._messages:
+                internal_session.append(msg.to_dict())
+            
+            self._conversation_state = ConversationState(
+                message_history=self._messages.copy(),
+                internal_session=internal_session,
+                tools=self._tools.copy()
+            )
+        
+        return self._conversation_state
+
     def _add_tool_call_to_conversation(self, tool_name: str, tool_call_id: str, arguments: dict) -> None:
         """Add a tool call message to the conversation state."""
         if self._conversation_state is None:
@@ -220,21 +340,8 @@ class LLMPromptBuilder:
         self._conversation_state.message_history.append(tool_call_msg)
         self._conversation_state.api_messages.append(tool_call_msg.to_dict())
     
-    def _add_tool_result_to_conversation(self, tool_call_id: str, result: Any) -> None:
-        """Add a tool result message to the conversation state."""
-        if self._conversation_state is None:
-            return
-        
-        tool_result_msg = ToolResultMessage(
-            tool_call_id=tool_call_id,
-            result=result
-        )
-        
-        self._conversation_state.message_history.append(tool_result_msg)
-        self._conversation_state.api_messages.append(tool_result_msg.to_dict())
-    
-    def _execute_tool_call(self, tool_name: str, arguments: dict) -> Any:
-        """Execute a tool call and return the result."""
+    def _execute_tool_call(self, tool_name: str, arguments: dict) -> tuple[Any | None, Exception | None]:
+        """Execute a tool call and return (result, error) tuple."""
         # Find the tool by name
         tool = None
         for t in self._tools:
@@ -243,14 +350,15 @@ class LLMPromptBuilder:
                 break
         
         if tool is None:
-            raise ValueError(f"Tool '{tool_name}' not found in available tools")
+            error = ValueError(f"Tool '{tool_name}' not found in available tools")
+            return None, error
         
         try:
             # Execute the tool function with the provided arguments
-            return tool.function(**arguments)
+            result = tool.function(**arguments)
+            return result, None
         except Exception as e:
-            # Return error information that can be sent back to the model
-            return f"Error executing tool '{tool_name}': {str(e)}"
+            return None, e
 
     # ------------------------------------------------------------------
     # Tool validation helpers
@@ -369,91 +477,78 @@ class LLMPromptBuilder:
         """Alias for prompt_for_text: execute the prompt and return a text response."""
         return await self.prompt_for_text(**kwargs)
 
-    @asyncify
-    async def prompt_conversation(self, message: str | None = None, **kwargs: Any) -> tuple[MessageList, "LLMPromptBuilder"]:
-        """Execute conversation with optional tool calling support.
+    def prompt_conversation(self, **kwargs: Any) -> "ConversationGenerator":
+        """Execute conversation with tool calling support using async generator.
         
-        Similar to prompt_for_text but supports conversations and optional tool calling.
-        Only supports text messages - no image, audio, or structured output support.
+        Returns a ConversationGenerator that yields individual messages as the conversation 
+        progresses and provides access to the continuation builder after completion.
         
         Args:
-            message: Optional text message to add to conversation
             **kwargs: Additional arguments passed to the provider API
         
         Returns:
-            Tuple of (message_list, continuation_builder) where message_list
-            contains all messages including tool calls and responses.
-        """
-
-        # Create a new instance for this conversation
-        new_instance = self._copy()
-        
-        # Initialize conversation state if not already present
-        if new_instance._conversation_state is None:
-            # Convert existing messages to provider format for initial state
-            internal_session = []
-            for msg in new_instance._messages:
-                internal_session.append(msg.to_dict())
+            ConversationGenerator that yields messages and provides continuation access
             
-            new_instance._conversation_state = ConversationState(
-                message_history=new_instance._messages.copy(),
-                internal_session=internal_session,
-                tools=new_instance._tools.copy()
-            )
+        Example:
+            ```python
+            conversation = llm.agent("...").request("...").prompt_conversation()
+            
+            # Manual iteration
+            response1 = await conversation.__anext__()
+            response2 = await conversation.__anext__()
+            
+            # For loop iteration  
+            async for message in conversation:
+                print(f"Received: {message}")
+                
+            # Access continuation builder after completion
+            continuation_builder = conversation.llm_continuation
+            ```
+        """
+        return ConversationGenerator(self, **kwargs)
+
+    @asyncify
+    async def prompt_agentically(self, max_calls: int, **kwargs: Any) -> tuple[MessageList, "LLMPromptBuilder"]:
+        """Execute conversation with automatic tool calling up to max_calls.
         
-        # Add the user message if provided
-        if message is not None:
-            user_message = TextMessage(text=message)
-            new_instance._conversation_state.message_history.append(user_message)
-            new_instance._conversation_state.internal_session.append(user_message.to_dict())
+        Similar to the old prompt_conversation behavior - automatically processes
+        all tool calls and returns the complete message list and continuation.
         
-        # Build Prompt for model selection and API call
-        p = Prompt(
-            messages=MessageList(new_instance._conversation_state.message_history),
-            expect_type=ResponseType.TEXT,  # Conversations are text-only for now
-            preferred_provider=new_instance._preferred_provider,
-            preferred_model=new_instance._preferred_model,
-            tools=new_instance._tools,
-            is_conversation=True,
-        )
+        Args:
+            max_calls: Maximum number of API calls to prevent infinite loops
+            **kwargs: Additional arguments passed to the provider API
         
-        # Select model and provider
-        provider, model = new_instance._model_selector.select_model(p)
+        Returns:
+            Tuple of (complete_message_list, continuation_builder)
+        """
+        messages = []
+        call_count = 0
         
-        # Check if provider supports tools (only if tools are defined)
-        if self._tools and (not hasattr(provider, 'supports_tools') or not provider.supports_tools()):
-            raise ValueError(
-                f"Provider {type(provider).__name__} does not support tool calling. "
-                f"Tool calling is currently only supported with Anthropic provider."
-            )
+        # Get the conversation generator
+        conversation = self.prompt_conversation(**kwargs)
         
-        # Validate capabilities
-        provider.check_capabilities(model, p)
-        
-        # Make the API call
         try:
-            response_text = await provider.prompt_via_api(
-                model=model, 
-                p=p, 
-                conversation_state=new_instance._conversation_state,
-                **kwargs
-            )
+            # Automatically iterate through all messages up to max_calls
+            while call_count < max_calls:
+                try:
+                    message = await conversation.__anext__()
+                    messages.append(message)
+                    call_count += 1
+                except StopAsyncIteration:
+                    break
         except Exception as e:
-            # Re-raise with more context about the conversation state
-            raise RuntimeError(f"Error during tool calling conversation: {str(e)}") from e
+            # Re-raise with context
+            raise RuntimeError(f"Error during automatic conversation processing: {str(e)}") from e
         
-        # Add the final response to conversation history
-        # Note: Tool calls and tool results should already be added by the provider
-        from .messages import Role
-        response_message = TextMessage(text=response_text, role=Role.ASSISTANT)
-        new_instance._conversation_state.message_history.append(response_message)
-        new_instance._conversation_state.internal_session.append(response_message.to_dict())
+        # Get continuation builder from the generator
+        continuation_builder = conversation.llm_continuation
+        if continuation_builder is None:
+            # If we hit max_calls, create a continuation builder from current state
+            continuation_builder = self._copy()
+            if hasattr(self, '_conversation_state'):
+                continuation_builder._conversation_state = self._conversation_state
         
-        # Create continuation builder with updated conversation state
-        continuation_builder = new_instance._copy()
-        continuation_builder._conversation_state = new_instance._conversation_state
-        
-        return new_instance._conversation_state.message_history, continuation_builder
+        return MessageList(messages), continuation_builder
 
     # ------------------------------------------------------------------
     # Execution

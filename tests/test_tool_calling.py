@@ -13,7 +13,7 @@ from typing import Optional
 
 from fluent_llm import llm
 from fluent_llm.tools import Tool
-from fluent_llm.messages import ToolCallMessage, ToolResultMessage, TextMessage
+from fluent_llm.messages import ToolCallMessage, TextMessage
 
 
 def get_weather(location: str, units: str = "celsius") -> str:
@@ -136,7 +136,7 @@ class TestBuilderToolMethods:
         
         # This should not raise an error - prompt_conversation supports zero tools
         try:
-            builder.prompt_conversation("Hello")
+            conversation = builder.request("Hello").prompt_conversation()
         except ValueError as e:
             if "requires tools to be defined" in str(e):
                 pytest.fail("prompt_conversation should work without tools defined")
@@ -178,7 +178,8 @@ class TestToolCallingConversation:
                 llm
                 .agent("You are a helpful assistant")
                 .tools([get_weather])
-                .prompt_conversation("What's the weather in Paris?")
+                .request("What's the weather in Paris?")
+                .prompt_agentically(max_calls=5)
             )
             
             # Verify the conversation flow

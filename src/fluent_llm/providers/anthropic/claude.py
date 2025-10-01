@@ -3,7 +3,7 @@ from decimal import Decimal
 import anthropic
 
 from ..provider import LLMProvider, LLMModel
-from ...messages import MessageList, TextMessage, ImageMessage, AgentMessage, ToolCallMessage, ToolResultMessage
+from ...messages import MessageList, TextMessage, ImageMessage, AgentMessage, ToolCallMessage
 from ...exceptions import *
 from ...usage_tracker import tracker
 from ...prompt import Prompt
@@ -154,6 +154,10 @@ class AnthropicProvider(LLMProvider):
 
     def _handle_text_response(self, response) -> str:
         """Handle a regular text response from Anthropic."""
+        # Handle empty content (can happen with some API responses)
+        if len(response.content) == 0:
+            return ""
+        
         # Validate and extract the single text block.
         if len(response.content) != 1:
             raise RuntimeError(f"Expected exactly one content block, got {len(response.content)}")
@@ -166,7 +170,8 @@ class AnthropicProvider(LLMProvider):
     async def _handle_tool_use_response(self, response, p: Prompt, conversation_state=None) -> Any:
         """Handle a tool use response from Anthropic.
         
-        This method processes tool calls, executes them, and continues the conversation.
+        For the new async generator pattern, this method returns a response object
+        that contains tool calls for the generator to process.
         """
         # Extract tool calls from response
         tool_calls = []
@@ -182,93 +187,14 @@ class AnthropicProvider(LLMProvider):
                     "input": content_block.input
                 })
         
-        # Add any text content that came with tool calls to conversation state
-        if text_content.strip() and conversation_state is not None:
-            from ...messages import TextMessage, Role
-            text_msg = TextMessage(text=text_content.strip(), role=Role.ASSISTANT)
-            conversation_state.message_history.append(text_msg)
-            conversation_state.internal_session.append(text_msg.to_dict())
-        
-        # Add tool calls to conversation state
-        for tool_call in tool_calls:
-            if conversation_state is not None:
-                from ...messages import ToolCallMessage
-                tool_call_msg = ToolCallMessage(
-                    tool_name=tool_call["name"],
-                    tool_call_id=tool_call["id"],
-                    arguments=tool_call["input"]
-                )
-                conversation_state.message_history.append(tool_call_msg)
-                conversation_state.internal_session.append(tool_call_msg.to_dict())
-        
         if not tool_calls:
             raise RuntimeError("Expected tool calls in tool_use response, but found none")
         
-        # Execute tool calls and collect results
-        tool_results = []
-        for tool_call in tool_calls:
-            try:
-                # Find the tool by name
-                tool = None
-                for t in p.tools:
-                    if t.name == tool_call["name"]:
-                        tool = t
-                        break
-                
-                if tool is None:
-                    result = f"Error: Tool '{tool_call['name']}' not found in available tools: {[t.name for t in p.tools]}"
-                else:
-                    # Validate tool call arguments
-                    try:
-                        # Execute the tool function
-                        result = tool.function(**tool_call["input"])
-                    except TypeError as e:
-                        if "unexpected keyword argument" in str(e) or "missing" in str(e):
-                            result = f"Error: Invalid arguments for tool '{tool_call['name']}': {str(e)}"
-                        else:
-                            raise
-                
-                tool_results.append({
-                    "tool_use_id": tool_call["id"],
-                    "content": str(result)
-                })
-                
-                # Add tool result to conversation state if provided
-                if conversation_state is not None:
-                    from ...messages import ToolResultMessage
-                    tool_result_msg = ToolResultMessage(
-                        tool_call_id=tool_call["id"],
-                        result=result
-                    )
-                    conversation_state.message_history.append(tool_result_msg)
-                    conversation_state.internal_session.append(tool_result_msg.to_dict())
-                
-            except Exception as e:
-                # Log the full error for debugging but provide a clean error message to the model
-                import traceback
-                error_details = traceback.format_exc()
-                print(f"Tool execution error for '{tool_call['name']}': {error_details}")
-                
-                error_result = f"Error executing tool '{tool_call['name']}': {str(e)}"
-                tool_results.append({
-                    "tool_use_id": tool_call["id"],
-                    "content": error_result
-                })
-                
-                # Add error result to conversation state if provided
-                if conversation_state is not None:
-                    from ...messages import ToolResultMessage
-                    tool_result_msg = ToolResultMessage(
-                        tool_call_id=tool_call["id"],
-                        result=error_result
-                    )
-                    conversation_state.message_history.append(tool_result_msg)
-                    conversation_state.internal_session.append(tool_result_msg.to_dict())
-        
-        # Continue the conversation with tool results
-        return await self._continue_conversation_with_tool_results(
-            p, response, tool_results, text_content, conversation_state
-        )
+        # Return a simple dict that the async generator can process
+        return {
+            'text': text_content,
+            'tool_calls': tool_calls
+        }
 
     async def _continue_conversation_with_tool_results(
         self, 
@@ -362,28 +288,35 @@ class AnthropicProvider(LLMProvider):
                 continue   # these are already handled via the system parameter on the API call
 
             elif isinstance(msg, ToolCallMessage):
-                # Tool calls are handled as assistant messages with tool_use content
+                # For the new unified ToolCallMessage, we need to handle both the tool call and result
+                content = []
+                
+                # Add any assistant message text
+                if msg.message:
+                    content.append({"type": "text", "text": msg.message})
+                
+                # Add the tool use
+                content.append({
+                    "type": "tool_use",
+                    "id": msg.tool_call_id,
+                    "name": msg.tool_name,
+                    "input": msg.arguments
+                })
+                
                 yield {
                     "role": "assistant",
-                    "content": [
-                        {
-                            "type": "tool_use",
-                            "id": msg.tool_call_id,
-                            "name": msg.tool_name,
-                            "input": msg.arguments
-                        }
-                    ]
+                    "content": content
                 }
-
-            elif isinstance(msg, ToolResultMessage):
-                # Tool results are handled as user messages with tool_result content
+                
+                # Add the tool result as a separate user message
+                result_content = str(msg.result) if msg.result is not None else str(msg.error)
                 yield {
                     "role": "user",
                     "content": [
                         {
                             "type": "tool_result",
                             "tool_use_id": msg.tool_call_id,
-                            "content": str(msg.result)
+                            "content": result_content
                         }
                     ]
                 }

@@ -203,11 +203,6 @@ class MessageList(list[Message]):
         """Check if the list contains any ToolCallMessage instances."""
         return self.has_type(ToolCallMessage)
 
-    @property
-    def has_tool_result(self) -> bool:
-        """Check if the list contains any ToolResultMessage instances."""
-        return self.has_type(ToolResultMessage)
-
     def to_dict_list(self) -> list[dict]:
         """Convert all messages in the list to their dictionary representation."""
         return [msg.to_dict() for msg in self]
@@ -231,18 +226,24 @@ class MessageList(list[Message]):
 
 @dataclass(slots=True)
 class ToolCallMessage(Message):
-    """A message representing a tool call made by the AI."""
+    """A message representing a complete tool call with execution result."""
+    message: str  # Any assistant message text accompanying the tool call
     tool_name: str
     tool_call_id: str
     arguments: dict
+    result: Any | None = None  # Tool execution result (when successful)
+    error: Exception | None = None  # Exception instance (when failed)
     role: Role = Role.ASSISTANT
 
     @property
     def content(self) -> dict:
         return {
+            "message": self.message,
             "tool_name": self.tool_name,
             "tool_call_id": self.tool_call_id,
-            "arguments": self.arguments
+            "arguments": self.arguments,
+            "result": self.result,
+            "error": str(self.error) if self.error else None
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -251,26 +252,11 @@ class ToolCallMessage(Message):
             "content": self.content
         }
 
-
-@dataclass(slots=True)
-class ToolResultMessage(Message):
-    """A message representing the result of a tool call."""
-    tool_call_id: str
-    result: Any
-    role: Role = Role.USER
-
-    @property
-    def content(self) -> dict:
-        return {
-            "tool_call_id": self.tool_call_id,
-            "result": self.result
-        }
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "role": self.role.value,
-            "content": self.content
-        }
+    def __str__(self) -> str:
+        """String representation showing tool call and result."""
+        if self.error:
+            return f"Tool call: {self.tool_name}({self.arguments}) -> ERROR: {self.error}"
+        return f"Tool call: {self.tool_name}({self.arguments}) -> {self.result}"
 
 
 class ResponseType(Enum):

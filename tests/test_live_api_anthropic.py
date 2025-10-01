@@ -1,6 +1,6 @@
 import pytest
 from fluent_llm import llm
-from fluent_llm.messages import ToolCallMessage, ToolResultMessage, TextMessage
+from fluent_llm.messages import ToolCallMessage, TextMessage
 
 
 @pytest.fixture(scope="module", autouse=True)
