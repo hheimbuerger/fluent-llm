@@ -292,17 +292,34 @@ class LLMPromptBuilder:
         new_instance._tools.append(tool)
         return new_instance
 
-    def tools(self, tool_functions: list[Any]) -> LLMPromptBuilder:
+    def tools(self, *tool_functions: Any) -> LLMPromptBuilder:
         """Add multiple tool definitions from functions, auto-deriving metadata.
         
         Args:
-            tool_functions: A list of callable functions to be used as tools
+            *tool_functions: Either individual callable functions as separate arguments,
+                           or a single list of callable functions
             
         Returns:
             A new LLMPromptBuilder instance with the tools added
+            
+        Examples:
+            # Pass individual functions as arguments
+            builder.tools(func1, func2, func3)
+            
+            # Pass a list of functions
+            builder.tools([func1, func2, func3])
         """
         new_instance = self._copy()
-        for tool_function in tool_functions:
+        
+        # Handle both individual args and list input
+        if len(tool_functions) == 1 and isinstance(tool_functions[0], list):
+            # Single argument that is a list - use the list contents
+            functions_to_add = tool_functions[0]
+        else:
+            # Multiple arguments or single non-list argument - use all args
+            functions_to_add = tool_functions
+        
+        for tool_function in functions_to_add:
             tool = Tool.from_function(tool_function)
             new_instance._tools.append(tool)
         return new_instance
