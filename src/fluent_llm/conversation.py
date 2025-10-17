@@ -7,8 +7,10 @@ This module implements the three-class architecture for conversation handling:
 """
 from __future__ import annotations
 
+import json
+import pathlib
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, TYPE_CHECKING
+from typing import Any, AsyncGenerator, IO, TYPE_CHECKING
 from .messages import Message, TextMessage, AgentMessage, ToolCallMessage, Role, ResponseType
 
 if TYPE_CHECKING:
@@ -348,3 +350,62 @@ class LLMConversation:
                     return None, e
         
         return None, ValueError(f"Tool '{tool_name}' not found")
+    
+    def save(self, destination: str | pathlib.Path | IO) -> None:
+        """Save the conversation's MessageList to a file or stream.
+        
+        This method serializes only the MessageList (message data) without
+        configuration or tools, making it model-agnostic and portable.
+        
+        Args:
+            destination: Can be:
+                - str: Path to save the JSON file
+                - pathlib.Path: Path object for the output file
+                - IO: An open file-like object (stream) to write to
+                
+        Raises:
+            IOError: If there's an error writing to the file/stream
+            MessageListDeserializationError: If serialization fails
+            
+        Examples:
+            ```python
+            # Save to file path (string)
+            conversation.save("conversation.json")
+            
+            # Save to Path object
+            from pathlib import Path
+            conversation.save(Path("conversation.json"))
+            
+            # Save to stream
+            with open("conversation.json", "w") as f:
+                conversation.save(f)
+            
+            # Later, restore and continue with any configuration
+            restored = llm.load_conversation("conversation.json")
+            continuation = restored.continuation \\
+                .provider("openai") \\
+                .request("Continue")
+            ```
+        """
+        try:
+            # Serialize MessageList to dictionary
+            data = self.messages.to_dict()
+            
+            # Handle different output types
+            if isinstance(destination, (str, pathlib.Path)):
+                # File path output
+                path = pathlib.Path(destination)
+                # Create parent directories if they don't exist
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with open(path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
+            elif hasattr(destination, 'write'):
+                # IO stream output
+                json_str = json.dumps(data, indent=2, ensure_ascii=False)
+                destination.write(json_str)
+            else:
+                raise ValueError(f"Unsupported destination type: {type(destination).__name__}. "
+                               f"Expected str, Path, or IO stream.")
+                
+        except Exception as e:
+            raise IOError(f"Failed to save conversation: {str(e)}") from e

@@ -6,7 +6,8 @@ that are applied when creating or executing a conversation.
 from __future__ import annotations
 
 import pathlib
-from typing import Any, Sequence, Type
+import json
+from typing import Any, Sequence, Type, IO
 import inspect
 from .utils import asyncify
 
@@ -349,6 +350,98 @@ class LLMPromptBuilder:
     def usage(self):
         """Access usage tracking."""
         return usage_tracker.tracker
+
+    def load_conversation(self, source: str | pathlib.Path | IO | dict) -> LLMConversation:
+        """Load a conversation from a file, stream, or dictionary.
+        
+        This method deserializes a MessageList and creates a new LLMConversation
+        with it. The conversation can then be configured with any provider, model,
+        or tools using the builder's configuration methods.
+        
+        Args:
+            source: Can be:
+                - str: Path to a JSON file containing serialized messages
+                - pathlib.Path: Path object to a JSON file
+                - IO: An open file-like object (stream) to read from
+                - dict: A dictionary containing serialized message data
+                
+        Returns:
+            A new LLMConversation with the loaded messages
+            
+        Raises:
+            FileNotFoundError: If the file path doesn't exist
+            json.JSONDecodeError: If the file/stream contains invalid JSON
+            MessageListDeserializationError: If the data format is invalid
+            
+        Examples:
+            ```python
+            # Load from file path (string)
+            conversation = llm.load_conversation("conversation.json")
+            
+            # Load from Path object
+            from pathlib import Path
+            conversation = llm.load_conversation(Path("conversation.json"))
+            
+            # Load from stream
+            with open("conversation.json", "r") as f:
+                conversation = llm.load_conversation(f)
+            
+            # Load from dictionary
+            data = {"messages": [...], "version": "1.0"}
+            conversation = llm.load_conversation(data)
+            
+            # Continue with any configuration
+            continuation = conversation.continuation \\
+                .provider("anthropic") \\
+                .request("Continue the conversation")
+            ```
+        """
+        try:
+            # Handle different input types
+            if isinstance(source, dict):
+                # Direct dictionary input
+                data = source
+            elif isinstance(source, (str, pathlib.Path)):
+                # File path input
+                path = pathlib.Path(source)
+                if not path.exists():
+                    raise FileNotFoundError(f"Conversation file not found: {path}")
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            elif hasattr(source, 'read'):
+                # IO stream input
+                content = source.read()
+                if isinstance(content, bytes):
+                    content = content.decode('utf-8')
+                data = json.loads(content)
+            else:
+                raise ValueError(f"Unsupported source type: {type(source).__name__}. "
+                               f"Expected str, Path, IO stream, or dict.")
+            
+            # Deserialize MessageList
+            messages = MessageList.from_dict(data)
+            
+            # Create new conversation with loaded messages
+            # Use the current builder's delta config as the initial config
+            config = ConversationConfig()
+            if self._delta_config:
+                # Apply any config deltas from this builder
+                for key, value in self._delta_config.items():
+                    if hasattr(config, key):
+                        setattr(config, key, value)
+            
+            return LLMConversation(messages=messages, config=config)
+            
+        except FileNotFoundError:
+            raise
+        except json.JSONDecodeError as e:
+            raise json.JSONDecodeError(
+                f"Invalid JSON in conversation data: {e.msg}",
+                e.doc,
+                e.pos
+            ) from e
+        except Exception as e:
+            raise type(e)(f"Failed to load conversation: {str(e)}") from e
 
 
 # ---------------------------------------------------------------------------

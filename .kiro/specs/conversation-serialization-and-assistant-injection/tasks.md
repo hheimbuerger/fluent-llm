@@ -111,7 +111,7 @@
   - Test capability detection (supports_tools)
   - _Requirements: 1-10, 12_
 
-- [ ] 3. Add convenience load/save methods
+- [x] 3. Add convenience load/save methods
   - Implement load_conversation() method on LLMPromptBuilder
     - Add support for string (filename) input
     - Add support for Path object input
@@ -124,13 +124,11 @@
     - Add support for IO stream output
     - Use JSON as the serialization format
   - Add error handling for file access and data format issues
-  - _Requirements: 11_
-
-- [ ] 3.1 Write unit tests for convenience methods
-  - Test load_conversation with different input types (string, Path, stream, dict)
-  - Test save with different output types (string, Path, stream)
-  - Test error handling for file access issues
-  - Test integration with MessageList serialization
+  - Write unit tests for convenience methods
+    - Test load_conversation with different input types (string, Path, stream, dict)
+    - Test save with different output types (string, Path, stream)
+    - Test error handling for file access issues
+    - Test integration with MessageList serialization
   - _Requirements: 11_
 
 - [ ] 4. Update documentation and API reference
