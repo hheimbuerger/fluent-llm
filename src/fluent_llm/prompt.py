@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from typing import Optional, Type, List
 from pydantic import BaseModel
 
-from .messages import MessageList, ResponseType
+from .messages import ResponseType
+from .conversation import MessageList
 
 
 @dataclass(slots=True)

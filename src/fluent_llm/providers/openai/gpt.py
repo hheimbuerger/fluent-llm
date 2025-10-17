@@ -1,6 +1,7 @@
 from typing import Any, Tuple, override
 from ...usage_tracker import tracker
-from ...messages import Message, AudioMessage, ImageMessage, TextMessage, AgentMessage
+from ...messages import Message, AudioMessage, ImageMessage, TextMessage, AgentMessage, ToolCallMessage
+from ...conversation import MessageList
 import openai
 import base64
 from io import BytesIO
@@ -11,7 +12,10 @@ from decimal import Decimal
 from ...prompt import Prompt
 
 
-class OpenAIProvider(LLMProvider):    
+class OpenAIProvider(LLMProvider):
+    def supports_tools(self) -> bool:
+        """Check if provider supports tool calling."""
+        return True    
     def get_models(self) -> Tuple[LLMModel]:
         return (
             LLMModel(
@@ -115,8 +119,8 @@ class OpenAIProvider(LLMProvider):
         # create client
         client = openai.AsyncOpenAI()
 
-        # Prepare messages for the responses API
-        openai_messages = [self._convert_to_openai_format(msg) for msg in p.messages]
+        # Prepare messages - use the proper conversion method that handles tool calls
+        openai_messages = self._convert_messages_to_openai_format(p.messages)
 
         # Handle image generation using the dedicated images API
         if p.image_out:
@@ -132,17 +136,23 @@ class OpenAIProvider(LLMProvider):
 
         elif p.audio_involved:
             # fall back to the Chat Completion API for audio-in :roll:
-            response = await client.chat.completions.create(
-                model=model,
-                messages=openai_messages,
-                modalities=['text', 'audio'] if p.audio_out else ['text'],
-                audio={
+            api_params = {
+                "model": model,
+                "messages": openai_messages,
+                "modalities": ['text', 'audio'] if p.audio_out else ['text'],
+                "audio": {
                     "format": "wav",
                     "voice": "nova",    # TODO: pick voice
                 } if p.audio_out else None,
-                store=True,
+                "store": True,
                 **kwargs,
-            )
+            }
+            
+            # Add tools if present
+            if p.has_tools:
+                api_params["tools"] = self._convert_tools_to_api_format(p.tools)
+            
+            response = await client.chat.completions.create(**api_params)
 
         # Handle non-image requests using the responses API
         else:
@@ -151,6 +161,11 @@ class OpenAIProvider(LLMProvider):
                 "input": openai_messages,
                 **kwargs,
             }
+            
+            # Add tools if present (for responses API)
+            if p.has_tools:
+                api_params["tools"] = self._convert_tools_to_api_format(p.tools)
+            
             if p.structured_out:
                 # For structured output, ensure we get JSON
                 api_params["text_format"] = p.expect_type
@@ -175,8 +190,8 @@ class OpenAIProvider(LLMProvider):
         else:
             raise NotImplementedError('Unexpected response type')
 
-        # Verify finish_reason – only 'stop' is considered success.
-        if finish_reason is not None and finish_reason != "stop":
+        # Verify finish_reason – only 'stop' and 'tool_calls' are considered success.
+        if finish_reason is not None and finish_reason not in ("stop", "tool_calls"):
             if finish_reason == "length":
                 raise NotImplementedError(
                     "OpenAI generation stopped due to length; continuation not implemented."
@@ -187,6 +202,10 @@ class OpenAIProvider(LLMProvider):
             if hasattr(response, 'error'):
                 error_msg += f" - {response.error}"
             raise RuntimeError(error_msg)
+
+        # Handle tool calls if present
+        if finish_reason == "tool_calls":
+            return self._handle_tool_calls_response(response, p)
 
         # if every check passed, we can now extract and convert the result
         return self._extract_result_from_response(response, p)
@@ -256,31 +275,137 @@ class OpenAIProvider(LLMProvider):
 
         raise NotImplementedError("The requested response type is not supported yet in call_llm_api.")
 
-    def _convert_to_openai_format(self, message: Message) -> dict:
-        """Convert a Message to the OpenAI API format."""
-        if isinstance(message, TextMessage) or isinstance(message, AgentMessage):
-            return {"role": message.role.value, "content": message.content}
+    def _convert_tools_to_api_format(self, tools: list) -> list:
+        """Convert Tool objects to OpenAI API format."""
+        api_tools = []
+        for tool in tools:
+            api_tools.append({
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.schema
+                }
+            })
+        return api_tools
 
-        elif isinstance(message, AudioMessage):
-            # encode the audio file
-            return {
-                "role": message.role.value,
-                "content": [
-                    {"type": "input_audio",
-                     "input_audio": {
-                        "data": message.content_b64,
-                        "format": "mp3"
-                     } }
-                ]
-            }
+    def _handle_tool_calls_response(self, response, p: Prompt) -> dict:
+        """Handle a tool calls response from OpenAI.
+        
+        Returns a dict with tool calls for the conversation generator to process.
+        """
+        # Extract tool calls from response
+        tool_calls = []
+        text_content = ""
+        
+        if isinstance(response, openai.types.chat.chat_completion.ChatCompletion):
+            # Chat Completions API format
+            if response.choices and len(response.choices) > 0:
+                message = response.choices[0].message
+                
+                # Get any text content
+                if message.content:
+                    text_content = message.content
+                
+                # Get tool calls
+                if message.tool_calls:
+                    for tool_call in message.tool_calls:
+                        import json
+                        tool_calls.append({
+                            "id": tool_call.id,
+                            "name": tool_call.function.name,
+                            "arguments": json.loads(tool_call.function.arguments)
+                        })
+        else:
+            # Responses API format (if it supports tool calls)
+            # This is a placeholder - adjust based on actual API structure
+            if hasattr(response, 'tool_calls'):
+                for tool_call in response.tool_calls:
+                    tool_calls.append({
+                        "id": tool_call.id,
+                        "name": tool_call.name,
+                        "arguments": tool_call.arguments
+                    })
+        
+        if not tool_calls:
+            raise RuntimeError("Expected tool calls in response, but found none")
+        
+        return {
+            'text': text_content,
+            'tool_calls': tool_calls
+        }
 
-        elif isinstance(message, ImageMessage):
-            # encode the image file
-            return {
-                "role": message.role.value,
-                "content": [
-                    {"type": "input_image", "image_url": message.base64_data_url}
-                ]
-            }
+    def _convert_messages_to_openai_format(self, messages: MessageList) -> list:
+        """Convert MessageList to OpenAI API format, handling tool calls properly.
+        
+        OpenAI requires tool calls and results to be in separate messages:
+        1. Assistant message with tool_calls
+        2. Tool message with the result
+        """
+        openai_messages = []
+        
+        for msg in messages:
+            if isinstance(msg, TextMessage) or isinstance(msg, AgentMessage):
+                openai_messages.append({
+                    "role": msg.role.value,
+                    "content": msg.content
+                })
+            
+            elif isinstance(msg, AudioMessage):
+                openai_messages.append({
+                    "role": msg.role.value,
+                    "content": [
+                        {"type": "input_audio",
+                         "input_audio": {
+                            "data": msg.content_b64,
+                            "format": "mp3"
+                         }}
+                    ]
+                })
+            
+            elif isinstance(msg, ImageMessage):
+                openai_messages.append({
+                    "role": msg.role.value,
+                    "content": [
+                        {"type": "input_image", "image_url": msg.base64_data_url}
+                    ]
+                })
+            
+            elif isinstance(msg, ToolCallMessage):
+                # For OpenAI, we need to split tool calls into two messages:
+                # 1. Assistant message with tool_calls
+                import json
+                assistant_msg = {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": msg.tool_call_id,
+                            "type": "function",
+                            "function": {
+                                "name": msg.tool_name,
+                                "arguments": json.dumps(msg.arguments)
+                            }
+                        }
+                    ]
+                }
+                
+                # Add content if present
+                if msg.message:
+                    assistant_msg["content"] = msg.message
+                
+                openai_messages.append(assistant_msg)
+                
+                # 2. Tool message with the result
+                result_content = str(msg.result) if msg.result is not None else str(msg.error)
+                openai_messages.append({
+                    "role": "tool",
+                    "tool_call_id": msg.tool_call_id,
+                    "content": result_content
+                })
+            
+            else:
+                raise ValueError(f"Unsupported message type: {type(msg).__name__}")
+        
+        return openai_messages
 
-        raise ValueError(f"Unsupported message type: {type(message).__name__}")
+

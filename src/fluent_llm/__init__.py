@@ -3,9 +3,15 @@
 from importlib import metadata
 
 from .builder import llm
+from .conversation import MessageList, LLMConversation, MessageListDeserializationError, DeltaApplicationError, ConversationConfigurationError
 
 __all__ = [
     "llm",
+    "MessageList",
+    "LLMConversation",
+    "MessageListDeserializationError",
+    "DeltaApplicationError",
+    "ConversationConfigurationError",
 ]
 
 try:

@@ -3,7 +3,8 @@ from decimal import Decimal
 import anthropic
 
 from ..provider import LLMProvider, LLMModel
-from ...messages import MessageList, TextMessage, ImageMessage, AgentMessage, ToolCallMessage
+from ...messages import TextMessage, ImageMessage, AgentMessage, ToolCallMessage
+from ...conversation import MessageList
 from ...exceptions import *
 from ...usage_tracker import tracker
 from ...prompt import Prompt

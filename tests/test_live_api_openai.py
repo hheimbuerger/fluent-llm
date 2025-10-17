@@ -171,3 +171,47 @@ async def test_usage_stats():
     # Get the usage stats
     assert llm.usage.cost.total_call_cost_usd > 0
     assert len(str(llm.usage)) > 0
+
+
+@pytest.mark.asyncio
+async def test_tool_calling_live():
+    """Live test: tool calling with OpenAI provider."""
+    
+    def get_weather(location: str) -> str:
+        """Get the current weather for a location."""
+        # Mock implementation for testing
+        return f"The weather in {location} is sunny and 22°C"
+    
+    def calculate(operation: str, a: float, b: float) -> float:
+        """Perform a mathematical calculation."""
+        if operation == "add":
+            return a + b
+        elif operation == "multiply":
+            return a * b
+        elif operation == "subtract":
+            return a - b
+        elif operation == "divide":
+            return a / b if b != 0 else 0
+        return 0
+    
+    # Test single tool call
+    response = await llm\
+        .agent("You are a helpful assistant with access to tools.")\
+        .tools(get_weather)\
+        .request("What's the weather like in Paris?")\
+        .prompt()
+    
+    assert isinstance(response, str)
+    assert "Paris" in response or "paris" in response.lower()
+    print("Tool calling response:", response)
+    
+    # Test with multiple tools
+    response2 = await llm\
+        .agent("You are a helpful assistant with access to tools.")\
+        .tools(get_weather, calculate)\
+        .request("What's 15 plus 27?")\
+        .prompt()
+    
+    assert isinstance(response2, str)
+    assert "42" in response2
+    print("Multi-tool response:", response2)

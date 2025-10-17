@@ -91,27 +91,31 @@ async def test_tool_calling_conversation_live():
 
     print("Starting tool calling conversation test...")
     
-    messages, continuation = await (
+    # New API: prompt_conversation() returns LLMConversation
+    conversation = (
         llm
         .model('claude-sonnet-4-5-20250929')
         .agent("You are a helpful assistant. When asked about weather, use the get_weather tool. Always explain what you're doing before calling tools.")
         .tool(get_weather)
-        .prompt_conversation("What's the weather in Paris?")
+        .request("What's the weather in Paris?")
+        .prompt_conversation()
     )
     
-    print(f"Received {len(messages)} messages")
-    for i, msg in enumerate(messages):
-        print(f"Message {i}: {type(msg).__name__} - {str(msg)[:100]}...")
+    # Collect messages by iterating
+    messages = []
+    async for message in conversation:
+        messages.append(message)
+        print(f"Message {len(messages)}: {type(message).__name__} - {str(message)[:100]}...")
     
-    # Should contain user message and AI response at minimum
-    assert len(messages) >= 2
+    print(f"Received {len(messages)} messages total")
+    
+    # Should contain AI responses
+    assert len(messages) >= 1
     
     # Verify roles are correct
     from fluent_llm.messages import Role
-    user_messages = [msg for msg in messages if hasattr(msg, 'role') and msg.role == Role.USER]
     assistant_messages = [msg for msg in messages if hasattr(msg, 'role') and msg.role == Role.ASSISTANT]
     
-    assert len(user_messages) >= 1, "Should have at least one user message"
     assert len(assistant_messages) >= 1, "Should have at least one assistant message"
     
     # Check if tool was actually called by looking for weather data in the response
@@ -125,11 +129,14 @@ async def test_tool_calling_conversation_live():
     
     # Test conversation continuation
     print("Testing conversation continuation...")
-    final_messages, _ = await continuation.prompt_conversation(
-        "What about London?"
-    )
+    continuation = conversation.continuation
+    next_conversation = continuation.request("What about London?").prompt_conversation()
     
-    print(f"Final conversation has {len(final_messages)} messages")
+    final_messages = []
+    async for message in next_conversation:
+        final_messages.append(message)
+    
+    print(f"Continuation has {len(final_messages)} new messages")
     final_response_msg = final_messages[-1]
     final_response = str(final_response_msg)
     print(f"Final response: {final_response}")

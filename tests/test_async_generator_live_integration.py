@@ -61,8 +61,8 @@ class TestAsyncGeneratorLiveIntegration:
                 # Generator completed naturally
                 pass
             
-            # Access continuation builder from the conversation generator
-            continuation_builder = conversation.llm_continuation
+            # Access continuation builder from the conversation
+            continuation_builder = conversation.continuation
             
             # Verify we got expected message types
             assert len(messages) >= 1
@@ -114,13 +114,12 @@ class TestAsyncGeneratorLiveIntegration:
         assert len(tool_messages) >= 1
         
         # Verify continuation builder is available after async for completion
-        continuation_builder = conversation.llm_continuation
-        if continuation_builder:
-            assert isinstance(continuation_builder, LLMPromptBuilder)
+        continuation_builder = conversation.continuation
+        assert isinstance(continuation_builder, LLMPromptBuilder)
 
     @pytest.mark.asyncio
-    async def test_prompt_agentically_compatibility_with_continuation(self):
-        """Test prompt_agentically compatibility and continuation builder functionality."""
+    async def test_conversation_with_continuation(self):
+        """Test conversation and continuation builder functionality."""
         
         def calculate(operation: str, x: float, y: float) -> float:
             """Perform basic mathematical operations."""
@@ -133,28 +132,40 @@ class TestAsyncGeneratorLiveIntegration:
             else:
                 raise ValueError(f"Unknown operation: {operation}")
         
-        # First conversation using prompt_agentically
-        messages, continuation = await llm \
+        # First conversation
+        conversation = llm \
             .agent('You are a calculator assistant.') \
             .tool(calculate) \
             .request('Calculate 5 + 3 and then multiply the result by 2') \
-            .prompt_agentically(max_calls=5)
+            .prompt_conversation()
         
-        # Verify we got messages and continuation
+        messages = []
+        async for message in conversation:
+            messages.append(message)
+            if len(messages) >= 5:  # Limit iterations
+                break
+        
+        # Verify we got messages
         assert len(messages) >= 1
-        assert isinstance(continuation, LLMPromptBuilder)
         
         # Should have tool call messages
         tool_messages = [msg for msg in messages if isinstance(msg, ToolCallMessage)]
         assert len(tool_messages) >= 1
         
+        # Get continuation
+        continuation = conversation.continuation
+        assert isinstance(continuation, LLMPromptBuilder)
+        
         # Test continuation with follow-up
-        follow_up_messages, final_continuation = await continuation \
-            .request("Now divide that result by 4") \
-            .prompt_agentically(max_calls=3)
+        follow_up_conversation = continuation.request("Now divide that result by 4").prompt_conversation()
+        
+        follow_up_messages = []
+        async for message in follow_up_conversation:
+            follow_up_messages.append(message)
+            if len(follow_up_messages) >= 3:  # Limit iterations
+                break
         
         assert len(follow_up_messages) >= 1
-        assert isinstance(final_continuation, LLMPromptBuilder)
 
     @pytest.mark.asyncio
     async def test_tool_error_handling_in_async_generator(self):
@@ -197,15 +208,12 @@ class TestAsyncGeneratorLiveIntegration:
 
 
     def test_conversation_method_signature_validation(self):
-        """Test that prompt_conversation method has correct signature (no message parameter)."""
+        """Test that prompt_conversation method has correct signature."""
         
         import inspect
         
         # Get the method signature
         sig = inspect.signature(llm.prompt_conversation)
-        
-        # Should not have a 'message' parameter
-        assert 'message' not in sig.parameters
         
         # Should have **kwargs for additional arguments
         param_names = list(sig.parameters.keys())
@@ -213,6 +221,10 @@ class TestAsyncGeneratorLiveIntegration:
             param.kind == param.VAR_KEYWORD for param in sig.parameters.values()
         )
         
-        # Return type should be AsyncGenerator (this is harder to test at runtime)
-        # but we can at least verify the method exists and is callable
+        # Method should exist and be callable
         assert callable(llm.prompt_conversation)
+        
+        # Return type should be LLMConversation (we can verify this at runtime)
+        from fluent_llm.conversation import LLMConversation
+        result = llm.prompt_conversation()
+        assert isinstance(result, LLMConversation)

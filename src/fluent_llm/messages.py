@@ -164,66 +164,6 @@ class AgentMessage(Message):
             "content": self.text
         }
 
-class MessageList(list[Message]):
-    """A list of Message objects with additional type-checking methods.
-
-    This class provides convenience methods to check for the presence of
-    different message types in the list.
-    """
-
-    def __init__(self, iterable: Iterable[Message] = ()):
-        super().__init__(iterable)
-
-    def has_type(self, msg_type: Type[Message]) -> bool:
-        """Check if the list contains any messages of the specified type."""
-        return any(isinstance(msg, msg_type) for msg in self)
-
-    @property
-    def has_text(self) -> bool:
-        """Check if the list contains any TextMessage instances."""
-        return self.has_type(TextMessage)
-
-    @property
-    def has_audio(self) -> bool:
-        """Check if the list contains any AudioMessage instances."""
-        return self.has_type(AudioMessage)
-
-    @property
-    def has_image(self) -> bool:
-        """Check if the list contains any ImageMessage instances."""
-        return self.has_type(ImageMessage)
-
-    @property
-    def has_agent(self) -> bool:
-        """Check if the list contains any AgentMessage instances."""
-        return self.has_type(AgentMessage)
-
-    @property
-    def has_tool_call(self) -> bool:
-        """Check if the list contains any ToolCallMessage instances."""
-        return self.has_type(ToolCallMessage)
-
-    def to_dict_list(self) -> list[dict]:
-        """Convert all messages in the list to their dictionary representation."""
-        return [msg.to_dict() for msg in self]
-
-    def merge_all_text(self) -> str:
-        """Merge all text messages into a single string."""
-        return "\n".join(msg.text for msg in self if isinstance(msg, (AgentMessage, TextMessage)))
-
-    def merge_all_agent(self) -> str:
-        """Merge all agent messages into a single string."""
-        return "\n".join(msg.text for msg in self if isinstance(msg, AgentMessage))
-
-    def copy(self) -> 'MessageList':
-        """Return a shallow copy of the MessageList.
-
-        Returns:
-            A new MessageList instance containing the same Message objects.
-        """
-        return MessageList(self)
-
-
 @dataclass(slots=True)
 class ToolCallMessage(Message):
     """A message representing a complete tool call with execution result."""

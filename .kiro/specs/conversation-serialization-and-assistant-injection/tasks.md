@@ -1,0 +1,148 @@
+# Implementation Plan
+
+- [x] 1. Refactor to three-class architecture with delta pattern
+  - Implement MessageList class with serialization support
+    - Create MessageList class with mutable operations (append, extend, copy)
+    - Implement to_dict() and from_dict() methods for JSON serialization
+    - Add support for all existing message types (TextMessage, AgentMessage, ToolCallMessage, etc.)
+    - Add version handling for future compatibility
+    - Add error handling: MessageListDeserializationError for invalid data
+  - Create new LLMConversation class as mutable execution context
+    - Implement LLMConversation with MessageList ownership
+    - Add ConversationConfig dataclass for execution configuration
+    - Implement apply_config_deltas() method for configuration updates
+    - Add continuation property that returns LLMPromptBuilder
+    - Implement async iterator protocol (__aiter__, __anext__)
+    - Implement _create_generator() for API call handling with tool call execution
+    - Ensure MessageList grows during iteration
+    - Add error handling: ConversationConfigurationError for config issues
+  - Restructure LLMPromptBuilder with delta pattern
+    - Modify LLMPromptBuilder to use conversation reference and deltas
+    - Implement delta_messages and delta_config accumulation
+    - Add _copy_with_delta_message() and _copy_with_delta_config() methods
+    - Ensure all builder methods return new instances (immutability)
+    - Implement .assistant(text) method that adds TextMessage with Role.ASSISTANT
+    - Ensure proper message ordering and whitespace stripping
+    - Modify prompt_conversation() to apply deltas to referenced conversation
+    - Add message delta application (extend MessageList)
+    - Add config delta application via apply_config_deltas()
+    - Add error handling: DeltaApplicationError for delta application failures
+  - Update conversation continuation system
+    - Implement continuation property on LLMConversation
+    - Ensure continuation builders reference the source conversation
+    - Add support for early continuation access during iteration
+    - Test that continuation reflects current conversation state
+  - Update one-shot execution methods to use conversations
+    - Modify prompt() to create temporary conversation and extract final result 
+    - Update prompt_for_image() to use conversation execution model
+    - Update prompt_for_type() to use conversation execution model
+    - Update prompt_for_audio() to use conversation execution model
+    - Ensure all execution goes through conversation async iteration
+  - Remove old classes and update integration
+    - Remove ConversationGenerator class
+    - Remove ConversationState class
+    - Update prompt_agentically() to work with new LLMConversation
+    - Update all imports and references throughout the codebase
+  - Update existing tests to use new architecture
+    - Modify existing conversation tests to use new classes
+    - Update tool calling tests for new execution model
+    - Update async generator tests for new conversation system
+    - Ensure all existing functionality still works
+  - _Requirements: 1-10, 12_
+
+- [x] 1.1 Write comprehensive unit tests for core architecture
+  - Test MessageList serialization (round-trip for all message types, version handling, error cases)
+  - Test MessageList mutable operations (append, extend)
+  - Test conversation mutability and execution (MessageList growth, config delta application, continuation builder creation)
+  - Test async iteration behavior
+  - Test builder immutability and deltas (all methods return new instances, delta accumulation, original builders unchanged)
+  - Test assistant message injection
+  - Test delta application (message deltas, config deltas, error handling)
+  - Test continuation system (builder creation, conversation reference preservation, early access, state reflection)
+  - Test unified execution model (one-shot methods use conversation, consistency between one-shot and multi-turn)
+  - Test error handling (invalid deserialization, delta failures, configuration errors, error message clarity)
+  - _Requirements: 1-10, 12_
+
+- [x] 1.2 Write integration tests for complete flow
+  - Test builder → conversation → continuation flow
+  - Test serialization → restoration → continuation
+  - Test configuration management via deltas
+  - Test early continuation access during iteration
+  - Test cross-component interactions
+  - _Requirements: 1-10, 12_
+
+- [x] 1.3 Write live API integration tests
+  - Test real conversation flows with API calls
+  - Test serialization with actual conversation data
+  - Test cross-model continuation with restored conversations
+  - Test tool calling with new architecture
+  - _Requirements: 1-10, 12_
+
+- [x] 2. Implement tool calling and multi-turn conversation support in OpenAI provider
+  - Update OpenAI provider to support tool calling
+    - Implement tool definition conversion to OpenAI format
+    - Add support for function calling in chat completions
+    - Handle tool call responses from OpenAI API
+    - Implement tool result submission back to API
+    - Add proper error handling for tool execution failures
+  - Update OpenAI provider for multi-turn conversations
+    - Modify prompt_via_api to handle conversation state
+    - Support message history accumulation across turns
+    - Handle assistant messages in conversation context
+    - Ensure proper message ordering and role handling
+  - Add provider capability detection
+    - Implement supports_tools() method for OpenAI provider
+    - Return True to indicate tool calling support
+    - Ensure capability checks work with new architecture
+  - Test tool calling with OpenAI
+    - Verify tool definitions are correctly formatted
+    - Test single tool call execution
+    - Test multiple tool calls in one response
+    - Test tool call error handling
+    - Test multi-turn conversations with tools
+  - _Requirements: 1-10, 12_
+
+- [x] 2.1 Write unit tests for OpenAI tool calling
+  - Test tool definition conversion to OpenAI format
+  - Test tool call response parsing
+  - Test tool result formatting
+  - Test error handling for tool failures
+  - Test multi-turn conversation flow
+  - Test capability detection (supports_tools)
+  - _Requirements: 1-10, 12_
+
+- [ ] 3. Add convenience load/save methods
+  - Implement load_conversation() method on LLMPromptBuilder
+    - Add support for string (filename) input
+    - Add support for Path object input
+    - Add support for IO stream input
+    - Add support for dict input
+    - Use JSON as the deserialization format
+  - Implement save() method on LLMConversation
+    - Add support for string (filename) output
+    - Add support for Path object output
+    - Add support for IO stream output
+    - Use JSON as the serialization format
+  - Add error handling for file access and data format issues
+  - _Requirements: 11_
+
+- [ ] 3.1 Write unit tests for convenience methods
+  - Test load_conversation with different input types (string, Path, stream, dict)
+  - Test save with different output types (string, Path, stream)
+  - Test error handling for file access issues
+  - Test integration with MessageList serialization
+  - _Requirements: 11_
+
+- [ ] 4. Update documentation and API reference
+  - Update README with new conversation patterns
+  - Add examples showing assistant message injection
+  - Add examples showing serialization/restoration with convenience methods
+  - Add examples showing continuation patterns
+  - Document the three-class architecture and mutability model
+  - Add migration guide from old architecture
+  - Document MessageList class and methods
+  - Document LLMConversation class and methods
+  - Document LLMPromptBuilder changes (assistant method, delta pattern)
+  - Document convenience load/save methods
+  - Add code examples for each public method
+  - _Requirements: All requirements_

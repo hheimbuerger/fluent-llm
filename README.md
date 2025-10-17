@@ -19,26 +19,56 @@ Express every LLM interaction in your app prototypes in a single statement, with
 
 TBD three good examples, a simple one, maybe one with audio, one with tool calling?
 
-## Prompt Builder
+## Overview
 
-The `llm` global instance is a `LLMPromptBuilder` instance, which can be used to build prompts.
+This library supports two related, but distinct prompt building paradigms:
 
-The following prompt components can be used in an arbitrary order and multiple times:
+1. One-shot prompts: you construct a prompt, send it, get a direct response in an immediately usable format (no `Response`-type class).
+2. Multi-turn conversations: construct a prompt and use it to start a conversation, then request multiple responses from the LLM (potentially including tool calls), send a follow-up prompt, etc.
+
+## Constructing prompts
+
+The `llm` global instance can be used to build prompts, using the following mutators:
 
 * `.agent(str)`: Sets the agent description, defines system behavior.
+* `.assistant(str)`: Prefills an LLM response.
 * `.context(str)`: Passes textual context to the LLM.
 * `.request(str)`: Passes the main request to the LLM. (Identical to `.context()`, just used to clarify the intent.)
 * `.image(filename | PIL.Image)`: Passes an image to the LLM.
 * `.audio(filename | soundfile.SoundFile)`: Passes an audio file to the LLM.
+* `.tool(tool_func)` or `.tools(tool_func1, tool_func2, ...)`: Registers functions as potential tool calls to offer to the LLM.
 
-The prompt chain is terminated by the following methods:
+Other mutators change the behavior of the system, e.g. `.provider()`, `.model()` and `.call_limit()`. We'll discuss these later.
 
-* `.prompt(): str`: Sends the prompt to the LLM and expects a text response.
-* `.prompt_for_image(): PIL.Image`: Sends the prompt to the LLM and expects an image response.
-* *[to be implemented]* ~~`.prompt_for_audio(): soundfile.SoundFile`: Sends the prompt to the LLM and expects an audio response.~~
-* `.prompt_for_structured_output(pydantic_model): BaseModel`: Sends the prompt to the LLM and expects a structured response.
+## Submitting prompts
+
+When your prompt has been constructed, you submit it to the LLM in different ways, depending on the paradigm you require.
+
+### One-shot prompts
+
+To get a one-shot response, use one of the following methods:
+
+* `.prompt(): str`: Sends the prompt to the LLM and returns a text response.
+* `.prompt_for_image(): PIL.Image`: Sends the prompt to the LLM and returns an image response.
+* *[to be implemented]* ~~`.prompt_for_audio(): soundfile.SoundFile`: Sends the prompt to the LLM and returns an audio response.~~
+* `.prompt_for_structured_output(pydantic_model): BaseModel`: Sends the prompt to the LLM and returns a Python object instance.
 
 They will either return the desired response if processing was successful, or raise an exception otherwise.
+
+### Multi-turn conversations
+
+Alternatively, begin a conversation:
+
+* `.start_conversation()`: Starts a conversation with the LLM, and returns a `LLMConversation` instance.
+
+This instance implements the async generator protocol, and can be used to iterate over the responses from the LLM.
+
+```python
+for message in conversation:
+    # ...
+```
+
+Afterwards, you can retrieve a new builder from `conversation.llm_continuation`, which you can use to follow-up with more one-shot prompts and keep the conversation going.
 
 ## Getting Started
 
@@ -192,6 +222,10 @@ response = await llm \
     .request("Explain quantum computing") \
     .prompt()
 ```
+
+## Tool Calls
+
+TBD
 
 ## Customization
 
