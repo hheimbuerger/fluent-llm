@@ -1,0 +1,11 @@
+https://community.openai.com/t/confusion-between-per-minute-audio-pricing-vs-token-based-audio-pricing/1073222
+
+https://community.openai.com/t/how-do-i-calculate-the-usage-cost-when-using-the-gpt-4o-mini-tts-model/1263804
+
+https://community.openai.com/t/token-discrepancy-when-using-images/1083811/5
+
+https://community.openai.com/t/how-much-does-openai-image-editing-cost-compared-to-new-image-generation/1274919/13
+
+https://community.openai.com/t/gpt-image-1-collected-pricing-information-and-why-responses-is-undocumented/1275254
+
+https://community.openai.com/t/token-discrepancy-when-using-images/1083811

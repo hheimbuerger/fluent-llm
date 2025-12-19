@@ -131,7 +131,7 @@
     - Test integration with MessageList serialization
   - _Requirements: 11_
 
-- [ ] 4. Update documentation and API reference
+- [x] 4. Update documentation and API reference
   - Update README with new conversation patterns
   - Add examples showing assistant message injection
   - Add examples showing serialization/restoration with convenience methods

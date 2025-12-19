@@ -17,7 +17,168 @@ Express every LLM interaction in your app prototypes in a single statement, with
 
 ## Examples
 
-TBD three good examples, a simple one, maybe one with audio, one with tool calling?
+### Simple Text Interaction
+
+```python
+from fluent_llm import llm
+
+# One-shot prompt
+response = llm \
+    .agent("You are a helpful math tutor.") \
+    .request("What is the Pythagorean theorem?") \
+    .prompt()
+
+print(response)
+```
+
+### Multi-Turn Conversation with Continuation
+
+```python
+from fluent_llm import llm
+
+# Start a conversation
+conversation = llm \
+    .agent("You are a Python expert.") \
+    .request("What are list comprehensions?") \
+    .prompt_conversation()
+
+async for message in conversation:
+    print(f"Assistant: {message.text}")
+
+# Continue the conversation
+follow_up = conversation.continuation \
+    .request("Can you show me an example?") \
+    .prompt_conversation()
+
+async for message in follow_up:
+    print(f"Assistant: {message.text}")
+```
+
+### Few-Shot Learning with Assistant Injection
+
+```python
+from fluent_llm import llm
+
+# Use assistant messages to provide examples
+response = llm \
+    .agent("You are a sentiment analyzer.") \
+    .request("I love this product!") \
+    .assistant("Positive") \
+    .request("This is terrible.") \
+    .assistant("Negative") \
+    .request("The weather is nice today.") \
+    .prompt()
+
+print(response)  # Expected: "Positive"
+```
+
+### Tool Calling
+
+```python
+from fluent_llm import llm
+
+def get_weather(location: str) -> str:
+    """Get the current weather for a location."""
+    return f"Weather in {location}: Sunny, 72°F"
+
+def calculate(expression: str) -> float:
+    """Evaluate a mathematical expression."""
+    return eval(expression)
+
+# Use tools in a conversation
+conversation = llm \
+    .agent("You are a helpful assistant with access to tools.") \
+    .tools(get_weather, calculate) \
+    .request("What's the weather in Paris and what's 15 * 23?") \
+    .prompt_conversation()
+
+async for message in conversation:
+    if hasattr(message, 'tool_name'):
+        print(f"Tool called: {message.tool_name}")
+        print(f"Result: {message.result}")
+    else:
+        print(f"Assistant: {message.text}")
+```
+
+### Conversation Serialization and Restoration
+
+```python
+from fluent_llm import llm
+
+# Create and save a conversation
+conversation = llm \
+    .agent("You are a creative writer.") \
+    .request("Write the beginning of a story about a robot.") \
+    .prompt_conversation()
+
+async for message in conversation:
+    print(message.text)
+
+conversation.save("story_conversation.json")
+
+# Later, load and continue with a different model
+restored = llm.load_conversation("story_conversation.json")
+continuation = restored.continuation \
+    .provider("anthropic") \
+    .request("Continue the story with a plot twist.") \
+    .prompt_conversation()
+
+async for message in continuation:
+    print(message.text)
+
+# Save the updated conversation
+continuation.save("story_conversation_continued.json")
+```
+
+### Audio Processing
+
+```python
+from fluent_llm import llm
+
+# Transcribe audio
+transcription = llm \
+    .audio("meeting_recording.mp3") \
+    .request("Transcribe this audio and summarize the key points.") \
+    .prompt()
+
+print(transcription)
+```
+
+### Image Analysis
+
+```python
+from fluent_llm import llm
+
+# Analyze an image
+analysis = llm \
+    .agent("You are an art critic.") \
+    .image("painting.jpg") \
+    .request("Analyze this painting's composition and style.") \
+    .prompt()
+
+print(analysis)
+```
+
+### Structured Output
+
+```python
+from fluent_llm import llm
+from pydantic import BaseModel
+
+class Recipe(BaseModel):
+    name: str
+    ingredients: list[str]
+    instructions: list[str]
+    prep_time_minutes: int
+
+recipe = llm \
+    .request("Give me a recipe for chocolate chip cookies.") \
+    .prompt_for_type(Recipe)
+
+print(f"Recipe: {recipe.name}")
+print(f"Prep time: {recipe.prep_time_minutes} minutes")
+print(f"Ingredients: {', '.join(recipe.ingredients)}")
+```
 
 ## Overview
 
@@ -26,12 +187,26 @@ This library supports two related, but distinct prompt building paradigms:
 1. One-shot prompts: you construct a prompt, send it, get a direct response in an immediately usable format (no `Response`-type class).
 2. Multi-turn conversations: construct a prompt and use it to start a conversation, then request multiple responses from the LLM (potentially including tool calls), send a follow-up prompt, etc.
 
+### Three-Class Architecture
+
+Fluent LLM uses a clean three-class architecture that separates concerns:
+
+1. **MessageList** (Mutable Data Container): Holds the conversation messages and handles serialization
+2. **LLMConversation** (Mutable Execution Context): Owns the MessageList and manages API calls
+3. **LLMPromptBuilder** (Immutable Composition Tool): Accumulates changes as deltas and applies them to conversations
+
+**Key Principles:**
+- **Single Source of Truth**: Messages exist only in the conversation's MessageList
+- **Delta Pattern**: Builders accumulate changes and apply them on execution
+- **Clear Mutability**: MessageList and Conversation are mutable for execution needs, Builder is immutable for composition safety
+- **Reference-Based Continuation**: Continuation builders automatically reference their source conversation
+
 ## Constructing prompts
 
 The `llm` global instance can be used to build prompts, using the following mutators:
 
 * `.agent(str)`: Sets the agent description, defines system behavior.
-* `.assistant(str)`: Prefills an LLM response.
+* `.assistant(str)`: Injects an assistant message into the conversation (useful for priming or few-shot examples).
 * `.context(str)`: Passes textual context to the LLM.
 * `.request(str)`: Passes the main request to the LLM. (Identical to `.context()`, just used to clarify the intent.)
 * `.image(filename | PIL.Image)`: Passes an image to the LLM.
@@ -39,6 +214,32 @@ The `llm` global instance can be used to build prompts, using the following muta
 * `.tool(tool_func)` or `.tools(tool_func1, tool_func2, ...)`: Registers functions as potential tool calls to offer to the LLM.
 
 Other mutators change the behavior of the system, e.g. `.provider()`, `.model()` and `.call_limit()`. We'll discuss these later.
+
+### Assistant Message Injection
+
+The `.assistant()` method allows you to inject assistant messages into your conversation. This is useful for:
+
+- **Few-shot learning**: Provide example responses to guide the model's behavior
+- **Conversation priming**: Start with a specific assistant response
+- **Conversation restoration**: Continue from a saved conversation state
+
+```python
+# Few-shot example
+response = llm \
+    .agent("You are a helpful translator.") \
+    .request("Translate 'hello' to French") \
+    .assistant("Bonjour") \
+    .request("Translate 'goodbye' to French") \
+    .prompt()
+# Expected: "Au revoir"
+
+# Priming a conversation
+conversation = llm \
+    .agent("You are a creative writer.") \
+    .assistant("I'm ready to help you craft amazing stories!") \
+    .request("Write a short story about a robot") \
+    .prompt_conversation()
+```
 
 ## Submitting prompts
 
@@ -59,16 +260,68 @@ They will either return the desired response if processing was successful, or ra
 
 Alternatively, begin a conversation:
 
-* `.start_conversation()`: Starts a conversation with the LLM, and returns a `LLMConversation` instance.
+* `.prompt_conversation()`: Starts a conversation with the LLM, and returns a `LLMConversation` instance.
 
 This instance implements the async generator protocol, and can be used to iterate over the responses from the LLM.
 
 ```python
-for message in conversation:
-    # ...
+conversation = llm \
+    .agent("You are a helpful assistant.") \
+    .request("What is Python?") \
+    .prompt_conversation()
+
+async for message in conversation:
+    print(f"Assistant: {message.text}")
 ```
 
-Afterwards, you can retrieve a new builder from `conversation.llm_continuation`, which you can use to follow-up with more one-shot prompts and keep the conversation going.
+Afterwards, you can retrieve a new builder from `conversation.continuation`, which you can use to follow-up with more prompts and keep the conversation going.
+
+```python
+# Continue the conversation
+follow_up = conversation.continuation \
+    .request("Tell me more about Python functions") \
+    .prompt_conversation()
+
+async for message in follow_up:
+    print(f"Assistant: {message.text}")
+```
+
+### Conversation Continuation Patterns
+
+The continuation system allows you to seamlessly continue conversations:
+
+```python
+# Start a conversation
+conversation = llm \
+    .agent("You are a math tutor.") \
+    .request("What is 2 + 2?") \
+    .prompt_conversation()
+
+async for message in conversation:
+    print(message.text)  # "2 + 2 equals 4."
+
+# Continue with follow-up questions
+continuation = conversation.continuation \
+    .request("What about 3 + 3?") \
+    .prompt_conversation()
+
+async for message in continuation:
+    print(message.text)  # "3 + 3 equals 6."
+
+# Access continuation at any time during iteration
+conversation = llm.request("Count to 5").prompt_conversation()
+count = 0
+async for message in conversation:
+    count += 1
+    if count == 2:
+        # Stop early and continue with a different request
+        break
+
+# The conversation has the partial response
+follow_up = conversation.continuation \
+    .request("Now count backwards from 5") \
+    .prompt_conversation()
+```
 
 ## Getting Started
 
@@ -223,9 +476,459 @@ response = await llm \
     .prompt()
 ```
 
+## Conversation Serialization
+
+Fluent LLM supports model-agnostic conversation serialization, allowing you to save and restore conversations across sessions or even switch between different LLM providers.
+
+### Saving Conversations
+
+Use the `.save()` method on a conversation to persist it:
+
+```python
+# Create and execute a conversation
+conversation = llm \
+    .agent("You are a helpful assistant.") \
+    .request("What is Python?") \
+    .prompt_conversation()
+
+async for message in conversation:
+    print(message.text)
+
+# Save to file (string path)
+conversation.save("my_conversation.json")
+
+# Save to Path object
+from pathlib import Path
+conversation.save(Path("conversations/session1.json"))
+
+# Save to stream
+with open("conversation.json", "w") as f:
+    conversation.save(f)
+```
+
+### Loading Conversations
+
+Use the `.load_conversation()` method on a builder to restore a conversation:
+
+```python
+# Load from file (string path)
+conversation = llm.load_conversation("my_conversation.json")
+
+# Load from Path object
+from pathlib import Path
+conversation = llm.load_conversation(Path("conversations/session1.json"))
+
+# Load from stream
+with open("conversation.json", "r") as f:
+    conversation = llm.load_conversation(f)
+
+# Load from dictionary
+import json
+with open("conversation.json", "r") as f:
+    data = json.load(f)
+conversation = llm.load_conversation(data)
+```
+
+### Continuing Restored Conversations
+
+Once loaded, you can continue conversations with any configuration:
+
+```python
+# Load a conversation
+conversation = llm.load_conversation("my_conversation.json")
+
+# Continue with a different provider or model
+continuation = conversation.continuation \
+    .provider("anthropic") \
+    .model("claude-sonnet-4-20250514") \
+    .request("Tell me more") \
+    .prompt_conversation()
+
+async for message in continuation:
+    print(message.text)
+
+# Save the updated conversation
+continuation.save("my_conversation_continued.json")
+```
+
+### Model-Agnostic Serialization
+
+The serialization format only includes message data, not configuration:
+
+```python
+# Start with OpenAI
+conversation = llm \
+    .provider("openai") \
+    .model("gpt-4o") \
+    .request("What is machine learning?") \
+    .prompt_conversation()
+
+async for message in conversation:
+    print(message.text)
+
+# Save the conversation
+conversation.save("ml_conversation.json")
+
+# Later, load and continue with Anthropic
+restored = llm.load_conversation("ml_conversation.json")
+continuation = restored.continuation \
+    .provider("anthropic") \
+    .model("claude-sonnet-4-20250514") \
+    .request("Explain neural networks") \
+    .prompt_conversation()
+
+async for message in continuation:
+    print(message.text)
+```
+
+### Serialization Format
+
+Conversations are serialized as JSON with the following structure:
+
+```json
+{
+  "messages": [
+    {
+      "type": "AgentMessage",
+      "text": "You are a helpful assistant",
+      "role": "system"
+    },
+    {
+      "type": "TextMessage",
+      "text": "What is Python?",
+      "role": "user"
+    },
+    {
+      "type": "TextMessage",
+      "text": "Python is a high-level programming language...",
+      "role": "assistant"
+    }
+  ],
+  "version": "1.0"
+}
+```
+
 ## Tool Calls
 
 TBD
+
+## API Reference
+
+### LLMPromptBuilder
+
+The immutable builder class for composing prompts. All methods return new builder instances.
+
+#### Message Composition Methods
+
+- **`.agent(text: str) -> LLMPromptBuilder`**: Add a system message defining agent behavior
+  ```python
+  builder = llm.agent("You are a helpful coding assistant.")
+  ```
+
+- **`.assistant(text: str) -> LLMPromptBuilder`**: Inject an assistant message (for few-shot examples or priming)
+  ```python
+  builder = llm.assistant("I'm ready to help with your code!")
+  ```
+
+- **`.context(text: str) -> LLMPromptBuilder`**: Add user context
+  ```python
+  builder = llm.context("Here is some background information...")
+  ```
+
+- **`.request(text: str) -> LLMPromptBuilder`**: Add a user request (same as context, but clarifies intent)
+  ```python
+  builder = llm.request("Explain how async/await works")
+  ```
+
+- **`.image(source: str | Path | PIL.Image) -> LLMPromptBuilder`**: Add an image to the prompt
+  ```python
+  builder = llm.image("diagram.png")
+  ```
+
+- **`.audio(source: str | Path | SoundFile) -> LLMPromptBuilder`**: Add audio to the prompt
+  ```python
+  builder = llm.audio("recording.mp3")
+  ```
+
+#### Configuration Methods
+
+- **`.provider(name: str) -> LLMPromptBuilder`**: Set preferred provider
+  ```python
+  builder = llm.provider("anthropic")
+  ```
+
+- **`.model(name: str) -> LLMPromptBuilder`**: Set preferred model
+  ```python
+  builder = llm.model("claude-sonnet-4-20250514")
+  ```
+
+- **`.tools(*functions) -> LLMPromptBuilder`**: Register tool functions
+  ```python
+  def get_weather(location: str) -> str:
+      return f"Weather in {location}: Sunny, 72°F"
+  
+  builder = llm.tools(get_weather)
+  ```
+
+#### Execution Methods
+
+- **`.prompt(**kwargs) -> str`**: Execute one-shot and return text response
+  ```python
+  response = llm.request("What is 2+2?").prompt()
+  ```
+
+- **`.prompt_for_image(**kwargs) -> PIL.Image`**: Execute one-shot and return image
+  ```python
+  image = llm.request("Draw a sunset").prompt_for_image()
+  ```
+
+- **`.prompt_for_type(model: Type[BaseModel], **kwargs) -> BaseModel`**: Execute one-shot and return structured output
+  ```python
+  from pydantic import BaseModel
+  
+  class Person(BaseModel):
+      name: str
+      age: int
+  
+  person = llm.request("Extract: John is 30 years old").prompt_for_type(Person)
+  ```
+
+- **`.prompt_conversation(**kwargs) -> LLMConversation`**: Start a multi-turn conversation
+  ```python
+  conversation = llm.request("Hello").prompt_conversation()
+  ```
+
+#### Serialization Methods
+
+- **`.load_conversation(source: str | Path | IO | dict) -> LLMConversation`**: Load a conversation from file, stream, or dict
+  ```python
+  # From file path
+  conversation = llm.load_conversation("conversation.json")
+  
+  # From Path object
+  from pathlib import Path
+  conversation = llm.load_conversation(Path("conversation.json"))
+  
+  # From stream
+  with open("conversation.json", "r") as f:
+      conversation = llm.load_conversation(f)
+  
+  # From dictionary
+  conversation = llm.load_conversation({"messages": [...], "version": "1.0"})
+  ```
+
+### LLMConversation
+
+The mutable execution context that owns the message history and handles API calls.
+
+#### Properties
+
+- **`.messages: MessageList`**: The conversation's message history (read-only access)
+  ```python
+  print(f"Conversation has {len(conversation.messages)} messages")
+  ```
+
+- **`.continuation: LLMPromptBuilder`**: Get a builder that references this conversation
+  ```python
+  follow_up = conversation.continuation.request("Tell me more")
+  ```
+
+#### Methods
+
+- **`.save(destination: str | Path | IO) -> None`**: Save conversation to file or stream
+  ```python
+  # Save to file path
+  conversation.save("conversation.json")
+  
+  # Save to Path object
+  from pathlib import Path
+  conversation.save(Path("conversation.json"))
+  
+  # Save to stream
+  with open("conversation.json", "w") as f:
+      conversation.save(f)
+  ```
+
+- **`.apply_config_deltas(delta_config: dict) -> None`**: Apply configuration changes (typically called internally)
+  ```python
+  conversation.apply_config_deltas({"preferred_provider": "anthropic"})
+  ```
+
+#### Async Iteration
+
+Conversations implement the async iterator protocol:
+
+```python
+conversation = llm.request("Count to 3").prompt_conversation()
+
+async for message in conversation:
+    print(message.text)
+    # Prints each response chunk or final message
+```
+
+### MessageList
+
+The mutable data container that holds conversation messages and handles serialization.
+
+#### Methods
+
+- **`.append(message: Message) -> None`**: Add a message to the list
+  ```python
+  from fluent_llm import TextMessage, Role
+  conversation.messages.append(TextMessage("Hello", Role.USER))
+  ```
+
+- **`.extend(messages: list[Message]) -> None`**: Add multiple messages
+  ```python
+  conversation.messages.extend([msg1, msg2, msg3])
+  ```
+
+- **`.copy() -> MessageList`**: Create a copy of the message list
+  ```python
+  backup = conversation.messages.copy()
+  ```
+
+- **`.to_dict() -> dict`**: Serialize to dictionary
+  ```python
+  data = conversation.messages.to_dict()
+  import json
+  json.dump(data, open("messages.json", "w"))
+  ```
+
+- **`.from_dict(data: dict) -> MessageList`**: Deserialize from dictionary (class method)
+  ```python
+  import json
+  data = json.load(open("messages.json"))
+  messages = MessageList.from_dict(data)
+  ```
+
+#### Iteration and Access
+
+MessageList supports standard Python sequence operations:
+
+```python
+# Length
+print(len(conversation.messages))
+
+# Iteration
+for message in conversation.messages:
+    print(message.text)
+
+# Indexing
+first_message = conversation.messages[0]
+last_message = conversation.messages[-1]
+```
+
+## Migration Guide
+
+If you're upgrading from an earlier version of Fluent LLM, here are the key changes:
+
+### Architecture Changes
+
+**Old Architecture:**
+- `ConversationGenerator` and `ConversationState` classes
+- State duplication between builder and conversation
+- Manual conversation state management
+
+**New Architecture:**
+- Three-class architecture: `MessageList`, `LLMConversation`, `LLMPromptBuilder`
+- Single source of truth for messages (in `MessageList`)
+- Delta pattern for immutable builders
+- Automatic conversation reference in continuations
+
+### Method Changes
+
+#### Starting Conversations
+
+**Before:**
+```python
+conversation = llm.request("Hello").start_conversation()
+```
+
+**After:**
+```python
+conversation = llm.request("Hello").prompt_conversation()
+```
+
+#### Accessing Continuations
+
+**Before:**
+```python
+continuation_builder = conversation.llm_continuation
+```
+
+**After:**
+```python
+continuation_builder = conversation.continuation
+```
+
+#### Serialization
+
+**Before:**
+```python
+# Manual JSON handling required
+import json
+data = {
+    "messages": [msg.to_dict() for msg in conversation.messages],
+    "config": conversation.config
+}
+json.dump(data, open("conv.json", "w"))
+```
+
+**After:**
+```python
+# Built-in convenience methods
+conversation.save("conv.json")
+
+# Or load
+conversation = llm.load_conversation("conv.json")
+```
+
+### Assistant Message Injection
+
+**New Feature:**
+```python
+# Now you can inject assistant messages for few-shot examples
+response = llm \
+    .agent("You are a translator.") \
+    .request("Translate 'hello' to French") \
+    .assistant("Bonjour") \
+    .request("Translate 'goodbye' to French") \
+    .prompt()
+```
+
+### Configuration Changes
+
+**Before:**
+```python
+# Configuration was part of serialization
+```
+
+**After:**
+```python
+# Configuration is separate from serialization
+# This allows model-agnostic conversation restoration
+conversation = llm.load_conversation("conv.json")
+continuation = conversation.continuation \
+    .provider("anthropic") \
+    .model("claude-sonnet-4-20250514") \
+    .request("Continue") \
+    .prompt_conversation()
+```
+
+### Breaking Changes
+
+1. **Removed Classes:**
+   - `ConversationGenerator` → Use `LLMConversation` with async iteration
+   - `ConversationState` → State is now managed by `LLMConversation`
+
+2. **Method Renames:**
+   - `.start_conversation()` → `.prompt_conversation()`
+   - `.llm_continuation` → `.continuation`
+
+3. **Serialization Format:**
+   - Configuration is no longer included in serialized data
+   - Only message history is serialized (model-agnostic)
 
 ## Customization
 

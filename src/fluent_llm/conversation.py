@@ -259,6 +259,8 @@ class LLMConversation:
     
     # Async iterator protocol
     def __aiter__(self):
+        # Reset generator when starting a new iteration
+        self._generator = None
         return self
     
     async def __anext__(self):

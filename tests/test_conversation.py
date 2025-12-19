@@ -156,11 +156,13 @@ class TestAsyncIteratorProtocol:
         """Test that conversation can be used in async for loop."""
         conv = LLMConversation()
         
-        # Mock the generator to avoid actual API calls
+        # Mock the generator creation to avoid actual API calls
         async def mock_generator():
             yield TextMessage("Response", Role.ASSISTANT)
         
-        conv._generator = mock_generator()
+        # Replace the _create_generator method instead of setting _generator directly
+        # since __aiter__ resets _generator
+        conv._create_generator = mock_generator
         
         messages = []
         try:
